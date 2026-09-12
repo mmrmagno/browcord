@@ -17,18 +17,14 @@ jobs:
   go:
     name: Go
     runs-on: ubuntu-latest
+    container: golang:1.27-trixie
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
       - name: Install GStreamer development headers
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          apt-get update
+          apt-get install -y --no-install-recommends \
             libglib2.0-dev \
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev
