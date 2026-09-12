@@ -1,6 +1,7 @@
 node_modules/
 web/dist/
 out/
+.env
 assets/*.h264
 assets/*.bcs
 /browcord
