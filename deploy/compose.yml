@@ -92,7 +92,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.room
-    image: browcord-room:dev
+    image: ${ROOM_IMAGE:-ghcr.io/mmrmagno/browcord-room:latest}
     networks:
       - rooms
     read_only: true

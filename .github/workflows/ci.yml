@@ -66,17 +66,27 @@ jobs:
         run: npm run build
 
   image:
-    name: Gateway image
+    name: Image (${{ matrix.component }})
     needs: [go, web]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: gateway
+            dockerfile: deploy/Dockerfile.gateway
+            description: "browcord gateway: auth, rooms, websocket fan out"
+          - component: room
+            dockerfile: deploy/Dockerfile.room
+            description: "browcord room: Xvfb, PulseAudio, Chromium, GStreamer, agent"
     steps:
       - uses: actions/checkout@v7
 
       - name: Lowercase image name
-        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}-gateway" >> "$GITHUB_ENV"
+        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}-${{ matrix.component }}" >> "$GITHUB_ENV"
 
       - uses: docker/setup-buildx-action@v4
 
@@ -99,20 +109,20 @@ jobs:
             type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
           labels: |
-            org.opencontainers.image.title=browcord-gateway
-            org.opencontainers.image.description=browcord gateway: auth, rooms, websocket fan out
+            org.opencontainers.image.title=browcord-${{ matrix.component }}
+            org.opencontainers.image.description=${{ matrix.description }}
 
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: ./deploy/Dockerfile.gateway
+          file: ./${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
           provenance: true
           sbom: true
 
