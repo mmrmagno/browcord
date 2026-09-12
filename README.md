@@ -251,6 +251,4 @@ Not done yet:
 
 ## License
 
-[AGPL-3.0](LICENSE). You can run, modify and self host browcord freely. If you run a
-modified version as a service that other people use, you have to publish your changes under
-the same license.
+[AGPL-3.0](LICENSE).
