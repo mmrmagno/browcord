@@ -16,7 +16,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.gateway
-    image: browcord-gateway:latest
+    image: ${GATEWAY_IMAGE:-ghcr.io/mmrmagno/browcord-gateway:latest}
     container_name: browcord-gateway
     restart: unless-stopped
     read_only: true

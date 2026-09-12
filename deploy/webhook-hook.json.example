@@ -1,0 +1,17 @@
+{
+  "id": "browcord",
+  "execute-command": "/path/to/browcord/scripts/deploy.sh",
+  "command-working-directory": "/path/to/browcord",
+  "include-command-output-in-response": true,
+  "include-command-output-in-response-on-error": true,
+  "trigger-rule": {
+    "match": {
+      "type": "payload-hmac-sha256",
+      "secret": "REPLACE_WITH_THE_SAME_VALUE_AS_THE_DEPLOY_WEBHOOK_SECRET_REPO_SECRET",
+      "parameter": {
+        "source": "header",
+        "name": "X-Hub-Signature-256"
+      }
+    }
+  }
+}
