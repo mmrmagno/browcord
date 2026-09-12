@@ -38,8 +38,9 @@ services:
       BROWCORD_FIXED_ROOM: ${BROWCORD_FIXED_ROOM:-main}
       BROWCORD_ROOM_IDLE: ${BROWCORD_ROOM_IDLE:-24h}
     networks:
-      - proxy
-      - rooms
+      proxy:
+      rooms:
+        ipv4_address: ${GATEWAY_IP:-10.89.0.2}
     expose:
       - "8080"
     healthcheck:
@@ -55,7 +56,6 @@ services:
         max-file: "3"
 
   netguard:
-    profiles: ["netguard"]
     build:
       context: ..
       dockerfile: deploy/netguard/Dockerfile
@@ -72,6 +72,8 @@ services:
       - no-new-privileges:true
     environment:
       ROOM_SUBNET: ${ROOM_SUBNET:-10.89.0.0/24}
+      GATEWAY_IP: ${GATEWAY_IP:-10.89.0.2}
+      AGENT_PORT: "8080"
     logging:
       driver: json-file
       options:
