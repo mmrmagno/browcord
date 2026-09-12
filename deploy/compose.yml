@@ -1,0 +1,123 @@
+name: browcord
+
+networks:
+  proxy:
+    name: ${PROXY_NETWORK:-proxy}
+    external: true
+  rooms:
+    name: browcord-rooms
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${ROOM_SUBNET:-10.89.0.0/24}
+
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.gateway
+      args:
+        CLIENT_ID: ${DISCORD_CLIENT_ID:?DISCORD_CLIENT_ID required in .env}
+    image: browcord-gateway:latest
+    container_name: browcord-gateway
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    environment:
+      BROWCORD_ADDR: ":8080"
+      BROWCORD_STATIC: "/app/web/dist"
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:?DISCORD_CLIENT_SECRET required in .env}
+      BROWCORD_AGENT_TOKEN: ${BROWCORD_AGENT_TOKEN:?BROWCORD_AGENT_TOKEN required in .env}
+      BROWCORD_SECRET: ${BROWCORD_SECRET:?BROWCORD_SECRET required in .env}
+      BROWCORD_ALLOW_GUILDS: ${BROWCORD_ALLOW_GUILDS:?BROWCORD_ALLOW_GUILDS required in .env}
+      BROWCORD_ALLOW_USERS: ${BROWCORD_ALLOW_USERS:-}
+      BROWCORD_FIXED_ROOM: ${BROWCORD_FIXED_ROOM:-main}
+      BROWCORD_ROOM_IDLE: ${BROWCORD_ROOM_IDLE:-24h}
+    networks:
+      - proxy
+      - rooms
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  netguard:
+    profiles: ["netguard"]
+    build:
+      context: ..
+      dockerfile: deploy/netguard/Dockerfile
+    image: browcord-netguard:latest
+    container_name: browcord-netguard
+    restart: unless-stopped
+    network_mode: host
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      ROOM_SUBNET: ${ROOM_SUBNET:-10.89.0.0/24}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  room:
+    container_name: browcord-room
+    depends_on:
+      - gateway
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.room
+    image: browcord-room:dev
+    networks:
+      - rooms
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./seccomp/chromium.json
+    pids_limit: 512
+    mem_limit: 3g
+    memswap_limit: 3g
+    cpus: 2.5
+    shm_size: 1g
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+      - /profile:size=512m,mode=0700,uid=10001,gid=10001
+      - /home/browcord:size=64m,mode=0700,uid=10001,gid=10001
+    environment:
+      ROOM_WIDTH: ${ROOM_WIDTH:-1280}
+      ROOM_HEIGHT: ${ROOM_HEIGHT:-720}
+      ROOM_FPS: "30"
+      ROOM_BITRATE_KBPS: "4000"
+      ROOM_ENCODER: ${ROOM_ENCODER:-vp8enc}
+      ROOM_START_URL: ${ROOM_START_URL:-https://duckduckgo.com}
+      BROWCORD_GATEWAY_URL: "ws://browcord-gateway:8080"
+      BROWCORD_ROOM_ID: ${BROWCORD_FIXED_ROOM:-main}
+      BROWCORD_AGENT_TOKEN: ${BROWCORD_AGENT_TOKEN:?}
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

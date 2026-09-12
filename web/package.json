@@ -1,0 +1,18 @@
+{
+  "name": "browcord",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "test": "node --test --experimental-strip-types src/app/*.test.ts",
+    "typecheck": "tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --lib es2022,dom,dom.iterable src/app/main.ts"
+  },
+  "dependencies": {
+    "@discord/embedded-app-sdk": "^2.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}

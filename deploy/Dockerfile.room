@@ -1,0 +1,57 @@
+FROM golang:1.27-trixie AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /out/browcord-agent ./cmd/browcord-agent
+
+FROM debian:trixie-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    DISPLAY=:0 \
+    PULSE_SERVER=unix:/tmp/pulse/native \
+    XDG_RUNTIME_DIR=/tmp/runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      xvfb x11-utils \
+      pulseaudio pulseaudio-utils \
+      chromium \
+      gstreamer1.0-tools \
+      gstreamer1.0-plugins-base \
+      gstreamer1.0-plugins-good \
+      gstreamer1.0-plugins-bad \
+      gstreamer1.0-plugins-ugly \
+      gstreamer1.0-x \
+      gstreamer1.0-pulseaudio \
+      ca-certificates \
+      fonts-liberation fonts-noto-core fonts-noto-color-emoji \
+      dumb-init \
+      curl unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG UBOLITE_VERSION=2026.907.2003
+RUN mkdir -p /opt/ubolite \
+    && curl -fsSL -o /tmp/ubolite.zip \
+       "https://github.com/uBlockOrigin/uBOL-home/releases/download/${UBOLITE_VERSION}/uBOLite_${UBOLITE_VERSION}.chromium.zip" \
+    && unzip -q /tmp/ubolite.zip -d /opt/ubolite \
+    && rm /tmp/ubolite.zip \
+    && test -f /opt/ubolite/manifest.json
+
+COPY deploy/install-ublock.sh /usr/local/bin/install-ublock
+RUN chmod +x /usr/local/bin/install-ublock && /usr/local/bin/install-ublock
+
+RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin browcord \
+    && mkdir -p /tmp/pulse /tmp/runtime /profile \
+    && chown -R browcord:browcord /tmp/pulse /tmp/runtime /profile
+
+COPY --from=build /out/browcord-agent /usr/local/bin/browcord-agent
+COPY deploy/room-entrypoint.sh /usr/local/bin/room-entrypoint
+RUN chmod +x /usr/local/bin/room-entrypoint
+
+USER browcord
+WORKDIR /home/browcord
+
+ENTRYPOINT ["/usr/bin/dumb-init", "--", "/usr/local/bin/room-entrypoint"]

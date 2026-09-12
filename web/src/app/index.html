@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <link rel="icon" type="image/svg+xml" href="icon.svg" />
+    <title>browcord</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --stage: #07090c;
+        --chrome: #14161c;
+        --field: #1c1f27;
+        --field-hi: #232733;
+        --line: #272b35;
+        --text: #e9ebf1;
+        --dim: #868e9e;
+        --accent: #5b66ee;
+        --live: #3fd77a;
+        --warn: #ffc44d;
+        --bad: #ff7a66;
+        --bar-h: 46px;
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: var(--stage);
+        color: var(--text);
+        font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        overscroll-behavior: none;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      #app { display: flex; flex-direction: column; height: 100%; }
+
+      #chrome {
+        position: relative;
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: var(--bar-h);
+        padding: 0 10px;
+        background: var(--chrome);
+        border-bottom: 1px solid var(--line);
+      }
+
+      #nav { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+
+      .icon-btn {
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        padding: 0;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--dim);
+        cursor: pointer;
+        transition: background 120ms ease, color 120ms ease;
+      }
+      .icon-btn:hover { background: var(--field-hi); color: var(--text); }
+      .icon-btn svg { width: 16px; height: 16px; display: block; }
+
+      :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+      #field {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 32px;
+        padding: 0 4px 0 11px;
+        border: 1px solid transparent;
+        border-radius: 9px;
+        background: var(--field);
+        transition: background 120ms ease, border-color 120ms ease;
+      }
+      #field:focus-within { background: var(--field-hi); border-color: var(--accent); }
+
+      #url {
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 100%;
+        border: 0;
+        background: none;
+        color: var(--text);
+        font: inherit;
+        letter-spacing: 0.1px;
+      }
+      #url:focus { outline: none; }
+      #url::placeholder { color: var(--dim); }
+
+      #note {
+        flex: 0 0 auto;
+        max-width: 45%;
+        padding: 3px 8px;
+        border-radius: 6px;
+        background: rgba(255, 122, 102, 0.14);
+        color: var(--bad);
+        font-size: 11.5px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #note.warn { background: rgba(255, 196, 77, 0.14); color: var(--warn); }
+      #note.live { background: rgba(63, 215, 122, 0.13); color: var(--live); }
+
+      #presence { flex: 0 0 auto; display: flex; align-items: center; padding-left: 2px; }
+      .pip {
+        width: 22px;
+        height: 22px;
+        margin-left: -6px;
+        border-radius: 50%;
+        border: 2px solid var(--chrome);
+        background: var(--pip);
+        color: #0a0c10;
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 18px;
+        text-align: center;
+        text-transform: capitalize;
+      }
+      .pip:first-child { margin-left: 0; }
+
+      #progress {
+        position: absolute;
+        left: 0;
+        bottom: -1px;
+        height: 2px;
+        width: 0;
+        background: var(--accent);
+        opacity: 0;
+        transition: width 220ms ease, opacity 220ms ease;
+      }
+      #progress.active { opacity: 1; }
+
+      #stage {
+        position: relative;
+        flex: 1 1 auto;
+        overflow: hidden;
+        background: #000;
+        touch-action: none;
+      }
+      #surface { position: absolute; inset: 0; transform-origin: 0 0; }
+      #screen { width: 100%; height: 100%; display: block; object-fit: contain; }
+
+      #cursors { position: absolute; inset: 0; pointer-events: none; }
+      .cursor {
+        position: absolute;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 10.5px;
+        font-weight: 600;
+        white-space: nowrap;
+        color: var(--cursor);
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+      }
+      .cursor::before {
+        content: "";
+        width: 0;
+        height: 0;
+        border-left: 7px solid var(--cursor);
+        border-bottom: 11px solid transparent;
+        border-right: 4px solid transparent;
+        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+      }
+
+      .float {
+        position: absolute;
+        bottom: 12px;
+        padding: 5px 11px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(12, 14, 19, 0.9);
+        color: var(--dim);
+        font-size: 11.5px;
+      }
+      #typing { left: 12px; }
+      #zoom { right: 12px; color: var(--text); font-family: inherit; cursor: pointer; }
+
+      #overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        padding: 28px;
+        text-align: center;
+        background: rgba(7, 9, 12, 0.96);
+      }
+      #overlay img { width: 56px; height: 56px; border-radius: 13px; }
+      #overlay-text {
+        max-width: 36ch;
+        color: var(--dim);
+        white-space: pre-line;
+        line-height: 1.65;
+        font-size: 13.5px;
+      }
+      #join {
+        padding: 11px 26px;
+        border: 0;
+        border-radius: 9px;
+        background: var(--accent);
+        color: #fff;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        transition: filter 120ms ease;
+      }
+      #join:hover { filter: brightness(1.12); }
+
+      #keyboard {
+        position: absolute;
+        opacity: 0;
+        width: 1px;
+        height: 1px;
+        border: 0;
+        padding: 0;
+        left: 50%;
+        bottom: 0;
+      }
+
+      [hidden] { display: none !important; }
+
+      @media (max-width: 430px) {
+        #chrome { gap: 7px; padding: 0 7px; }
+        #forward { display: none; }
+        .pip:nth-child(n + 4) { display: none; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * { transition: none !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="chrome">
+        <div id="nav">
+          <button id="back" class="icon-btn" title="Back" aria-label="Back">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+          </button>
+          <button id="forward" class="icon-btn" title="Forward" aria-label="Forward">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+          </button>
+          <button id="reload" class="icon-btn" title="Reload" aria-label="Reload">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 10-2.3 6.1"/><path d="M20 5v6h-6"/></svg>
+          </button>
+        </div>
+
+        <div id="field">
+          <input id="url" type="text" inputmode="url" autocomplete="off" autocapitalize="off"
+                 spellcheck="false" placeholder="Search or enter a link" />
+          <div id="note" hidden></div>
+        </div>
+
+        <div id="presence"></div>
+        <div id="progress"></div>
+      </div>
+
+      <div id="stage">
+        <div id="surface">
+          <canvas id="screen" width="1280" height="720"></canvas>
+          <div id="cursors"></div>
+        </div>
+        <div id="typing" class="float" hidden></div>
+        <button id="zoom" class="float" hidden>Reset zoom</button>
+
+        <div id="overlay">
+          <img src="icon.svg" alt="" />
+          <div id="overlay-text">Connecting to the room</div>
+          <button id="join" hidden>Join room</button>
+        </div>
+      </div>
+
+      <input id="keyboard" autocomplete="off" autocapitalize="off" spellcheck="false" aria-hidden="true" tabindex="-1" />
+    </div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="240" viewBox="0 0 680 240">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6d79f7"/>
+      <stop offset="0.55" stop-color="#4650d8"/>
+      <stop offset="1" stop-color="#242a8c"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.2" cy="0.1" r="0.8">
+      <stop offset="0" stop-color="#9aa3ff" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#9aa3ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e4eaf6"/>
+    </linearGradient>
+    <linearGradient id="play" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b66ee"/>
+      <stop offset="1" stop-color="#343dbd"/>
+    </linearGradient>
+    <filter id="lift" x="-25%" y="-25%" width="150%" height="165%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#0b0f2e" flood-opacity="0.45"/>
+    </filter>
+    <filter id="cur" x="-55%" y="-55%" width="230%" height="230%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#0b0f2e" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+
+  <rect width="680" height="240" fill="url(#bg)"/>
+  <rect width="680" height="240" fill="url(#glow)"/>
+
+  <g opacity="0.12" stroke="#ffffff" stroke-width="1.2">
+    <path d="M0 60 H680 M0 120 H680 M0 180 H680"/>
+    <path d="M90 0 V240 M200 0 V240 M310 0 V240 M420 0 V240 M530 0 V240 M620 0 V240"/>
+  </g>
+
+  <path d="M0 186 Q 170 150 340 180 T 680 162 L680 240 L0 240 Z" fill="#ffffff" opacity="0.06"/>
+
+  <g filter="url(#lift)" transform="translate(410 30) rotate(-6 125 90)">
+    <rect x="0" y="0" width="250" height="180" rx="18" fill="url(#glass)"/>
+    <path d="M0 18 A18 18 0 0 1 18 0 H232 A18 18 0 0 1 250 18 V44 H0 Z" fill="#d2dae9"/>
+    <circle cx="20" cy="22" r="5.5" fill="#ff7a66"/>
+    <circle cx="38" cy="22" r="5.5" fill="#ffc44d"/>
+    <circle cx="56" cy="22" r="5.5" fill="#3fd77a"/>
+    <rect x="72" y="14" width="160" height="16" rx="8" fill="#b6c2da"/>
+    <path d="M104 82 L104 146 L156 114 Z" fill="url(#play)" stroke="url(#play)" stroke-width="16" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+
+  <g filter="url(#cur)">
+    <g transform="translate(516 128) scale(0.72)">
+      <path d="M0 0 L0 62 L17 47 L28 72 L41 66 L30 42 L50 42 Z" fill="#3fd77a" stroke="#0f1428" stroke-width="6" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(614 74) scale(0.6)">
+      <path d="M0 0 L0 62 L17 47 L28 72 L41 66 L30 42 L50 42 Z" fill="#ff7a66" stroke="#0f1428" stroke-width="6" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(438 162) scale(0.55)">
+      <path d="M0 0 L0 62 L17 47 L28 72 L41 66 L30 42 L50 42 Z" fill="#ffc44d" stroke="#0f1428" stroke-width="6" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <text x="44" y="118" font-family="Inter Display, Inter, DejaVu Sans" font-weight="800" font-size="56" fill="#ffffff" letter-spacing="-1.6">browcord</text>
+  <rect x="46" y="137" width="58" height="5" rx="2.5" fill="#3fd77a"/>
+  <text x="45" y="172" font-family="Inter, DejaVu Sans" font-weight="600" font-size="19" fill="#e6eaff" opacity="0.95">One browser. Everyone clicks.</text>
+  <text x="45" y="198" font-family="Inter, DejaVu Sans" font-weight="400" font-size="14" fill="#c3cbff" opacity="0.88">A shared browser inside your voice channel.</text>
+</svg>

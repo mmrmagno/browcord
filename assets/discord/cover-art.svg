@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="576" viewBox="0 0 1024 576">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6d79f7"/>
+      <stop offset="0.55" stop-color="#4650d8"/>
+      <stop offset="1" stop-color="#242a8c"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.18" cy="0.1" r="0.75">
+      <stop offset="0" stop-color="#8e98ff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#8e98ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e4eaf6"/>
+    </linearGradient>
+    <linearGradient id="play" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b66ee"/>
+      <stop offset="1" stop-color="#343dbd"/>
+    </linearGradient>
+    <filter id="lift" x="-25%" y="-25%" width="150%" height="160%">
+      <feDropShadow dx="0" dy="16" stdDeviation="22" flood-color="#0b0f2e" flood-opacity="0.42"/>
+    </filter>
+    <filter id="cur" x="-50%" y="-50%" width="220%" height="220%">
+      <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#0b0f2e" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="576" fill="url(#bg)"/>
+  <rect width="1024" height="576" fill="url(#glow)"/>
+
+  <g opacity="0.13" stroke="#ffffff" stroke-width="1.5">
+    <path d="M0 120 H1024 M0 240 H1024 M0 360 H1024 M0 480 H1024"/>
+    <path d="M120 0 V576 M280 0 V576 M440 0 V576 M600 0 V576 M760 0 V576 M920 0 V576"/>
+  </g>
+
+  <path d="M0 430 Q 256 350 512 415 T 1024 380 L1024 576 L0 576 Z" fill="#ffffff" opacity="0.06"/>
+
+  <g filter="url(#lift)" transform="translate(586 126) rotate(-7 196 148)">
+    <rect x="0" y="0" width="392" height="296" rx="28" fill="url(#glass)"/>
+    <path d="M0 28 A28 28 0 0 1 28 0 H364 A28 28 0 0 1 392 28 V68 H0 Z" fill="#d2dae9"/>
+    <circle cx="31" cy="34" r="8" fill="#ff7a66"/>
+    <circle cx="57" cy="34" r="8" fill="#ffc44d"/>
+    <circle cx="83" cy="34" r="8" fill="#3fd77a"/>
+    <rect x="108" y="23" width="258" height="22" rx="11" fill="#b6c2da"/>
+    <path d="M166 136 L166 234 L252 185 Z" fill="url(#play)" stroke="url(#play)" stroke-width="24" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+
+  <g filter="url(#cur)">
+    <g transform="translate(756 322) scale(1.15)">
+      <path d="M0 0 L0 62 L17 47 L28 72 L41 66 L30 42 L50 42 Z" fill="#3fd77a" stroke="#0f1428" stroke-width="5" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(898 250) scale(0.95)">
+      <path d="M0 0 L0 62 L17 47 L28 72 L41 66 L30 42 L50 42 Z" fill="#ff7a66" stroke="#0f1428" stroke-width="5" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(650 398) scale(0.88)">
+      <path d="M0 0 L0 62 L17 47 L28 72 L41 66 L30 42 L50 42 Z" fill="#ffc44d" stroke="#0f1428" stroke-width="5" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <text x="66" y="248" font-family="Inter Display, Inter, DejaVu Sans" font-weight="800" font-size="90" fill="#ffffff" letter-spacing="-2.5">browcord</text>
+  <rect x="70" y="280" width="88" height="7" rx="3.5" fill="#3fd77a"/>
+  <text x="68" y="336" font-family="Inter, DejaVu Sans" font-weight="600" font-size="28" fill="#e6eaff" opacity="0.95">One browser. Everyone clicks.</text>
+  <text x="68" y="378" font-family="Inter, DejaVu Sans" font-weight="400" font-size="21" fill="#c3cbff" opacity="0.9">Watch, browse and argue about it together.</text>
+</svg>
