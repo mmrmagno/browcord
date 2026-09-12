@@ -16,8 +16,6 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.gateway
-      args:
-        CLIENT_ID: ${DISCORD_CLIENT_ID:?DISCORD_CLIENT_ID required in .env}
     image: browcord-gateway:latest
     container_name: browcord-gateway
     restart: unless-stopped

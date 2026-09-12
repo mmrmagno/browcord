@@ -93,6 +93,7 @@ func New(cfg Config) (*Gateway, error) {
 func (g *Gateway) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", g.health)
+	mux.HandleFunc("/api/config", g.config)
 	mux.HandleFunc("/api/token", g.token)
 	mux.HandleFunc("/api/clientlog", g.clientLog)
 	mux.HandleFunc("/ws/ctl", g.viewerCtl)
@@ -161,6 +162,12 @@ func (g *Gateway) reapIdleRooms(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (g *Gateway) config(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"clientId": g.cfg.ClientID,
+	})
 }
 
 func (g *Gateway) health(w http.ResponseWriter, r *http.Request) {

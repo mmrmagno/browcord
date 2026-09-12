@@ -5,14 +5,13 @@ import { decodeSupported, Player } from "./player";
 import {
   activityClient,
   authenticate,
+  clientID,
   ControlSocket,
   Identity,
   inDiscord,
   MediaSocket,
   reportClient,
 } from "./transport";
-
-declare const __CLIENT_ID__: string;
 
 interface Cursor {
   userId: string;
@@ -162,7 +161,7 @@ async function main(): Promise<void> {
 
   let identity: Identity;
   try {
-    identity = await authenticate(__CLIENT_ID__);
+    identity = await authenticate(await clientID());
   } catch (err) {
     console.error("browcord: join failed", err);
     showOverlay(`Could not join the room.\n${describe(err)}`, false);

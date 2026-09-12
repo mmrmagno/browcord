@@ -2,11 +2,6 @@ import * as esbuild from "esbuild";
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 
-const clientId = process.env.CLIENT_ID ?? "";
-if (!clientId) {
-  console.warn("CLIENT_ID is unset: builds will only run outside Discord");
-}
-
 const targets = [
   { entry: "src/app/main.ts", html: "src/app/index.html", icon: "src/app/icon.svg", out: "dist" },
 ];
@@ -24,7 +19,6 @@ for (const t of targets) {
     entryNames: "app-[hash]",
     sourcemap: true,
     metafile: true,
-    define: { __CLIENT_ID__: JSON.stringify(clientId) },
   });
 
   const jsOut = Object.keys(result.metafile.outputs).find((f) => f.endsWith(".js"));

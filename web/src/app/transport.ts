@@ -65,6 +65,16 @@ export function wsURL(path: string, query: Record<string, string>): string {
   return `${scheme}//${location.host}${base}${path}?${search}`;
 }
 
+export async function clientID(): Promise<string> {
+  const res = await fetch(`${base}/api/config`);
+  if (!res.ok) throw new Error(`config: ${res.status} ${await res.text()}`);
+
+  const body = (await res.json()) as { clientId?: string };
+  if (!body.clientId) throw new Error("the gateway reported no Discord client id");
+
+  return body.clientId;
+}
+
 export async function authenticate(clientId: string): Promise<Identity> {
   let code = "";
   let instanceId = params.get("instance_id") ?? "dev-room";
