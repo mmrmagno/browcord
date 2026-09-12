@@ -15,9 +15,7 @@
     <img src="https://github.com/mmrmagno/browcord/actions/workflows/ci.yml/badge.svg" alt="CI"/>
   </a>
   <img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white" alt="Go"/>
-  <img src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white" alt="TypeScript"/>
   <img src="https://img.shields.io/badge/Discord-Activity-5865F2?logo=discord&logoColor=white" alt="Discord Activity"/>
-  <img src="https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white" alt="Docker"/>
   <img src="https://img.shields.io/badge/video-VP8%20%2B%20Opus-6d79f7" alt="Codecs"/>
   <img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License"/>
 </p>
