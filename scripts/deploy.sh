@@ -1,16 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
-
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "-> git pull --ff-only"
-  git pull --ff-only
-else
-  echo "deploy: not a git checkout, skipping source sync" >&2
-fi
-
-cd deploy
+cd "$(dirname "$0")/../deploy"
 
 if [[ ! -f .env ]]; then
   echo "deploy: .env missing, copy .env.example and fill it in" >&2
