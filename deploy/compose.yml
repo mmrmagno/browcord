@@ -24,6 +24,9 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 256
+    cpus: 2.0
     tmpfs:
       - /tmp:size=16m,mode=1777
     environment:
@@ -70,6 +73,8 @@ services:
       - NET_ADMIN
     security_opt:
       - no-new-privileges:true
+    mem_limit: 64m
+    pids_limit: 64
     environment:
       ROOM_SUBNET: ${ROOM_SUBNET:-10.89.0.0/24}
       GATEWAY_IP: ${GATEWAY_IP:-10.89.0.2}
