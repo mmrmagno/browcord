@@ -1,6 +1,7 @@
 import { RevealGate } from "./gate";
 import { InputBridge } from "./input";
 import { Activity, PresenceReporter } from "./presence";
+import { contentBox } from "./viewport";
 import { decodeSupported, Player } from "./player";
 import {
   activityClient,
@@ -126,14 +127,21 @@ function renderPresence(people: Participant[], selfId: string): void {
 }
 
 function renderCursors(cursors: Cursor[], selfId: string): void {
+  const box = contentBox(
+    el.surface.clientWidth,
+    el.surface.clientHeight,
+    el.canvas.width,
+    el.canvas.height,
+  );
+
   el.cursors.replaceChildren(
     ...cursors
       .filter((c) => c.userId !== selfId)
       .map((c) => {
         const node = document.createElement("div");
         node.className = "cursor";
-        node.style.left = `${c.x * 100}%`;
-        node.style.top = `${c.y * 100}%`;
+        node.style.left = `${box.left + c.x * box.width}px`;
+        node.style.top = `${box.top + c.y * box.height}px`;
         node.style.setProperty("--cursor", colorFor(c.userId));
         node.textContent = c.name;
         return node;
@@ -192,46 +200,60 @@ async function main(): Promise<void> {
       )
     : null;
 
-  const ctl = new ControlSocket(identity, (msg) => {
-    switch (msg.type) {
-      case "cursors":
-        renderCursors((msg.cursors as Cursor[]) ?? [], identity.userId);
-        break;
+  let ctlWasOnline = true;
 
-      case "presence": {
-        const people = (msg.presence as Participant[]) ?? [];
-        renderPresence(people, identity.userId);
-        presence?.setViewers(people.length);
-        break;
+  const ctl = new ControlSocket(
+    identity,
+    (msg) => {
+      switch (msg.type) {
+        case "cursors":
+          renderCursors((msg.cursors as Cursor[]) ?? [], identity.userId);
+          break;
+
+        case "presence": {
+          const people = (msg.presence as Participant[]) ?? [];
+          renderPresence(people, identity.userId);
+          presence?.setViewers(people.length);
+          break;
+        }
+
+        case "nav": {
+          const nav = msg.nav as { url?: string; loading?: boolean } | undefined;
+          if (nav?.url && document.activeElement !== el.url) el.url.value = nav.url;
+          if (nav?.url) presence?.setSite(nav.url);
+          if (nav?.loading !== undefined) setLoading(nav.loading);
+          break;
+        }
+
+        case "typing": {
+          if (msg.userId === identity.userId) break;
+          el.typing.textContent = `${msg.name} is typing`;
+          el.typing.hidden = false;
+          clearTimeout(typingTimer);
+          typingTimer = window.setTimeout(() => {
+            el.typing.hidden = true;
+          }, 1600);
+          break;
+        }
+
+        case "error":
+          note(String(msg.message ?? "Something went wrong"), "warn");
+          setLoading(false);
+          break;
       }
-
-      case "nav": {
-        const nav = msg.nav as { url?: string; loading?: boolean } | undefined;
-        if (nav?.url && document.activeElement !== el.url) el.url.value = nav.url;
-        if (nav?.url) presence?.setSite(nav.url);
-        if (nav?.loading !== undefined) setLoading(nav.loading);
-        break;
+    },
+    (online) => {
+      if (online && !ctlWasOnline) {
+        note("Input reconnected", "live", 2500);
+      } else if (!online && ctlWasOnline) {
+        note("Input disconnected, reconnecting", "warn", 0);
+        void reportClient(identity, "ctl-offline", "control socket closed");
       }
+      ctlWasOnline = online;
+    },
+  );
 
-      case "typing": {
-        if (msg.userId === identity.userId) break;
-        el.typing.textContent = `${msg.name} is typing`;
-        el.typing.hidden = false;
-        clearTimeout(typingTimer);
-        typingTimer = window.setTimeout(() => {
-          el.typing.hidden = true;
-        }, 1600);
-        break;
-      }
-
-      case "error":
-        note(String(msg.message ?? "Something went wrong"), "warn");
-        setLoading(false);
-        break;
-    }
-  });
-
-  const input = new InputBridge(el.surface, el.keyboard, ctl, () => {
+  const input = new InputBridge(el.surface, el.canvas, el.keyboard, ctl, () => {
     const { scale, offsetX, offsetY } = input.view;
     el.surface.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
     el.zoom.hidden = scale === 1;

@@ -1,5 +1,8 @@
 export const HEADER_SIZE = 13;
 
+const CTL_RETRY_BASE_MS = 500;
+const CTL_RETRY_MAX_MS = 10000;
+
 export const enum ChunkType {
   VideoKey = 1,
   VideoDelta = 2,
@@ -171,27 +174,78 @@ export class MediaSocket {
 }
 
 export class ControlSocket {
-  private ws: WebSocket;
-  private queue: string[] = [];
+  private identity: Identity;
+  private onMessage: (msg: Record<string, unknown>) => void;
+  private onState: (online: boolean) => void;
 
-  constructor(identity: Identity, private onMessage: (msg: Record<string, unknown>) => void) {
-    this.ws = new WebSocket(wsURL("/ws/ctl", { room: identity.instanceId, token: identity.token }));
-    this.ws.onopen = () => {
-      for (const msg of this.queue) this.ws.send(msg);
+  private ws: WebSocket | null = null;
+  private queue: string[] = [];
+  private retry = 0;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private closed = false;
+
+  constructor(
+    identity: Identity,
+    onMessage: (msg: Record<string, unknown>) => void,
+    onState: (online: boolean) => void = () => {},
+  ) {
+    this.identity = identity;
+    this.onMessage = onMessage;
+    this.onState = onState;
+    this.connect();
+  }
+
+  private connect(): void {
+    if (this.closed) return;
+
+    const ws = new WebSocket(
+      wsURL("/ws/ctl", { room: this.identity.instanceId, token: this.identity.token }),
+    );
+    this.ws = ws;
+
+    ws.onopen = () => {
+      this.retry = 0;
+      for (const msg of this.queue) ws.send(msg);
       this.queue = [];
+      this.onState(true);
     };
-    this.ws.onmessage = (ev) => {
+
+    ws.onmessage = (ev) => {
       try {
         this.onMessage(JSON.parse(ev.data as string));
       } catch {
         // ignore anything that is not a control message
       }
     };
+
+    ws.onclose = () => {
+      if (this.ws === ws) this.ws = null;
+      this.onState(false);
+      this.scheduleReconnect();
+    };
+
+    ws.onerror = () => ws.close();
+  }
+
+  private scheduleReconnect(): void {
+    if (this.closed || this.timer !== null) return;
+
+    const wait = Math.min(CTL_RETRY_MAX_MS, CTL_RETRY_BASE_MS * 2 ** this.retry);
+    this.retry = Math.min(this.retry + 1, 6);
+
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.connect();
+    }, wait);
+  }
+
+  get online(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 
   send(msg: Record<string, unknown>): void {
     const encoded = JSON.stringify(msg);
-    if (this.ws.readyState === WebSocket.OPEN) {
+    if (this.ws !== null && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(encoded);
     } else if (this.queue.length < 32) {
       this.queue.push(encoded);
@@ -199,6 +253,9 @@ export class ControlSocket {
   }
 
   close(): void {
-    this.ws.close();
+    this.closed = true;
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = null;
+    this.ws?.close();
   }
 }

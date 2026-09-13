@@ -1,4 +1,5 @@
 import { ControlSocket } from "./transport";
+import { contentBox } from "./viewport";
 
 const POINTER_HZ = 25;
 
@@ -32,6 +33,7 @@ export class InputBridge {
 
   constructor(
     private surface: HTMLElement,
+    private media: HTMLCanvasElement,
     private textInput: HTMLInputElement,
     private ctl: ControlSocket,
     private onViewChange: () => void,
@@ -43,11 +45,12 @@ export class InputBridge {
 
   private normalize(clientX: number, clientY: number): { x: number; y: number } {
     const rect = this.surface.getBoundingClientRect();
-    const localX = (clientX - rect.left - this.view.offsetX) / this.view.scale;
-    const localY = (clientY - rect.top - this.view.offsetY) / this.view.scale;
+    const box = contentBox(rect.width, rect.height, this.media.width, this.media.height);
+    const localX = clientX - rect.left - box.left;
+    const localY = clientY - rect.top - box.top;
     return {
-      x: Math.max(0, Math.min(1, localX / rect.width)),
-      y: Math.max(0, Math.min(1, localY / rect.height)),
+      x: Math.max(0, Math.min(1, localX / box.width)),
+      y: Math.max(0, Math.min(1, localY / box.height)),
     };
   }
 

@@ -20,6 +20,11 @@ import (
 	"github.com/mmrmagno/browcord/internal/wire"
 )
 
+const (
+	ctlPingInterval = 25 * time.Second
+	ctlPingTimeout  = 10 * time.Second
+)
+
 type Config struct {
 	Addr         string
 	StaticDir    string
@@ -389,10 +394,20 @@ func (g *Gateway) viewerCtl(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	go func() {
+		ping := time.NewTicker(ctlPingInterval)
+		defer ping.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-ping.C:
+				deadline, cancel := context.WithTimeout(ctx, ctlPingTimeout)
+				err := conn.Ping(deadline)
+				cancel()
+				if err != nil {
+					return
+				}
 			case payload, open := <-v.Ctl:
 				if !open {
 					return
