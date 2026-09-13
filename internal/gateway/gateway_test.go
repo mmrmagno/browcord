@@ -335,3 +335,66 @@ func TestGatewayRequiresAllowListWithoutDevIdentity(t *testing.T) {
 		t.Fatal("gateway started with no allow-list and no dev identity: it would accept every guild")
 	}
 }
+
+func TestMediaSocketSurvivesItsOwnPings(t *testing.T) {
+	oldInterval, oldTimeout := ctlPingInterval, ctlPingTimeout
+	t.Cleanup(func() {
+		ctlPingInterval, ctlPingTimeout = oldInterval, oldTimeout
+	})
+	ctlPingInterval = 50 * time.Millisecond
+	ctlPingTimeout = 100 * time.Millisecond
+
+	_, srv := newTestGateway(t)
+	token, _ := mintSession(t, srv, "room-ping")
+
+	agent := wsDial(t, wsURLOf(srv, "/agent", "room=room-ping"), agentHeader())
+	viewer := wsDial(t, wsURLOf(srv, "/ws/media", "room=room-ping&token="+token), nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	received := make(chan wire.Chunk, 16)
+	readErr := make(chan error, 1)
+	go func() {
+		for {
+			_, data, err := viewer.Read(ctx)
+			if err != nil {
+				readErr <- err
+				return
+			}
+			chunk, err := wire.Unmarshal(data)
+			if err != nil {
+				readErr <- err
+				return
+			}
+			received <- chunk
+		}
+	}()
+
+	time.Sleep(6 * ctlPingInterval)
+
+	select {
+	case err := <-readErr:
+		t.Fatalf("the media socket died across %d ping cycles: %v", 6, err)
+	default:
+	}
+
+	encoded, err := wire.Chunk{Type: wire.VideoKey, PTS: 1000, Payload: []byte{0x65}}.Append(nil)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if err := agent.Write(ctx, websocket.MessageBinary, encoded); err != nil {
+		t.Fatalf("agent write: %v", err)
+	}
+
+	select {
+	case chunk := <-received:
+		if chunk.Type != wire.VideoKey {
+			t.Errorf("got chunk %v, want %v", chunk.Type, wire.VideoKey)
+		}
+	case err := <-readErr:
+		t.Fatalf("media socket closed instead of delivering a frame: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("no frame arrived after the ping cycles")
+	}
+}

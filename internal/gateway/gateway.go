@@ -20,7 +20,7 @@ import (
 	"github.com/mmrmagno/browcord/internal/wire"
 )
 
-const (
+var (
 	ctlPingInterval = 25 * time.Second
 	ctlPingTimeout  = 10 * time.Second
 )
@@ -357,7 +357,7 @@ func (g *Gateway) viewerMedia(w http.ResponseWriter, r *http.Request) {
 	v := rm.Join(viewerID, sess.UserID, sess.Name)
 	defer rm.Leave(viewerID)
 
-	ctx := r.Context()
+	ctx := conn.CloseRead(r.Context())
 
 	ping := time.NewTicker(ctlPingInterval)
 	defer ping.Stop()
