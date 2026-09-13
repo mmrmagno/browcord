@@ -108,13 +108,23 @@ Fill in `.env`:
 
 Generate the two secrets with something like `openssl rand -hex 32`.
 
-Then bring it up and apply the egress rules:
+Then bring it up. This builds both images locally and starts the gateway, the room and
+the egress filter:
 
 ```sh
 docker compose up -d --build
-sudo ROOM_SUBNET=10.89.0.0/24 ../deploy/netguard/apply.sh
+```
+
+Verify the room really is fenced in before you invite anyone:
+
+```sh
 ../deploy/verify-egress.sh
 ```
+
+`netguard` runs as a service rather than a one-shot script, so the rules are reapplied
+every five minutes and survive reboots and Docker restarts. Do not run
+`netguard/apply.sh` by hand: without `GATEWAY_IP` and `AGENT_PORT` it drops the room's
+connection to the gateway and the stream dies.
 
 Point your reverse proxy at the gateway, set the Activity URL mapping in the Discord
 developer portal to the same host, and launch it from a voice channel.
