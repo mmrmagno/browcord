@@ -282,6 +282,7 @@ async function main(): Promise<void> {
   });
 
   let announced = false;
+  let mediaWasOnline = true;
   let chunks = 0;
 
   const gate = new RevealGate(() => {
@@ -308,8 +309,14 @@ async function main(): Promise<void> {
         gate.stream();
       }
     },
-    () => {
-      showOverlay("The room closed the connection.\nReload to rejoin.", false);
+    (online) => {
+      if (online && !mediaWasOnline) {
+        note("Stream reconnected", "live", 2500);
+      } else if (!online && mediaWasOnline) {
+        note("Stream dropped, reconnecting", "warn", 0);
+        void reportClient(identity, "media-offline", "media socket closed", player.codec, player.decoded);
+      }
+      mediaWasOnline = online;
     },
   );
 

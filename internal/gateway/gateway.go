@@ -358,10 +358,21 @@ func (g *Gateway) viewerMedia(w http.ResponseWriter, r *http.Request) {
 	defer rm.Leave(viewerID)
 
 	ctx := r.Context()
+
+	ping := time.NewTicker(ctlPingInterval)
+	defer ping.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-ping.C:
+			deadline, cancel := context.WithTimeout(ctx, ctlPingTimeout)
+			err := conn.Ping(deadline)
+			cancel()
+			if err != nil {
+				return
+			}
 		case frame, open := <-v.Media:
 			if !open {
 				return

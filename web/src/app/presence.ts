@@ -4,6 +4,7 @@ export const LARGE_TEXT = "browcord: one browser, everyone clicks";
 export const PARTY_MAX = 16;
 
 const MIN_INTERVAL_MS = 5000;
+const RPC_COMMAND_UNAVAILABLE = 5012;
 
 export interface Activity {
   type: number;
@@ -62,6 +63,11 @@ export function describeActivity(
   };
 }
 
+function isUnsupported(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  return (err as { code?: unknown }).code === RPC_COMMAND_UNAVAILABLE;
+}
+
 function detail(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
   if (typeof err === "string") return err;
@@ -96,6 +102,7 @@ export class PresenceReporter {
   private stopped = false;
 
   updates = 0;
+  unsupported = false;
 
   constructor(
     send: SendActivity,
@@ -155,7 +162,8 @@ export class PresenceReporter {
       this.updates++;
     } catch (err) {
       this.stopped = true;
-      this.onError(`setActivity: ${detail(err)}`);
+      this.unsupported = isUnsupported(err);
+      if (!this.unsupported) this.onError(`setActivity: ${detail(err)}`);
     }
   }
 }

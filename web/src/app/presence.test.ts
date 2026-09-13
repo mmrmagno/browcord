@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { describeActivity, siteOf, PARTY_MAX } from "./presence.ts";
+import { describeActivity, siteOf, PARTY_MAX, PresenceReporter } from "./presence.ts";
 
 test("siteOf reduces a url to a bare host", () => {
   assert.equal(siteOf("https://www.youtube.com/watch?v=abc"), "youtube.com");
@@ -48,4 +48,30 @@ test("timestamps carry only a start so discord counts elapsed, not a countdown",
 
   assert.deepEqual(a.timestamps, { start: 1789224993000 });
   assert.ok(!("end" in a.timestamps));
+});
+
+test("a refused setActivity is reported, an unsupported one is not", async () => {
+  const errors: string[] = [];
+
+  const refused = new PresenceReporter(
+    () => Promise.reject({ code: 4006, message: "no permission" }),
+    "main",
+    (m) => errors.push(m),
+  );
+  refused.setSite("https://example.com");
+  await new Promise((r) => setTimeout(r, 30));
+
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /code=4006/);
+
+  const unsupported = new PresenceReporter(
+    () => Promise.reject({ code: 5012, message: "Command not available for this application" }),
+    "main",
+    (m) => errors.push(m),
+  );
+  unsupported.setSite("https://example.com");
+  await new Promise((r) => setTimeout(r, 30));
+
+  assert.equal(errors.length, 1, "5012 must not be reported as an error");
+  assert.equal(unsupported.unsupported, true);
 });

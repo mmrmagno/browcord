@@ -1,0 +1,11 @@
+.git
+.github
+.gitignore
+docs
+assets
+scripts
+out
+*.md
+web/node_modules
+web/dist
+web/dist-spike

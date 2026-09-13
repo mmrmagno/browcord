@@ -153,23 +153,74 @@ export async function reportClient(
 }
 
 export class MediaSocket {
-  private ws: WebSocket;
+  private identity: Identity;
+  private onChunk: (c: Chunk) => void;
+  private onState: (online: boolean) => void;
 
-  constructor(identity: Identity, onChunk: (c: Chunk) => void, onClose: () => void) {
-    this.ws = new WebSocket(wsURL("/ws/media", { room: identity.instanceId, token: identity.token }));
-    this.ws.binaryType = "arraybuffer";
-    this.ws.onmessage = (ev) => {
+  private ws: WebSocket | null = null;
+  private retry = 0;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private closed = false;
+
+  constructor(
+    identity: Identity,
+    onChunk: (c: Chunk) => void,
+    onState: (online: boolean) => void = () => {},
+  ) {
+    this.identity = identity;
+    this.onChunk = onChunk;
+    this.onState = onState;
+    this.connect();
+  }
+
+  private connect(): void {
+    if (this.closed) return;
+
+    const ws = new WebSocket(
+      wsURL("/ws/media", { room: this.identity.instanceId, token: this.identity.token }),
+    );
+    ws.binaryType = "arraybuffer";
+    this.ws = ws;
+
+    ws.onopen = () => {
+      this.retry = 0;
+      this.onState(true);
+    };
+
+    ws.onmessage = (ev) => {
       try {
-        onChunk(unmarshal(ev.data as ArrayBuffer));
+        this.onChunk(unmarshal(ev.data as ArrayBuffer));
       } catch {
         // a malformed frame is dropped; the next keyframe resynchronises playback
       }
     };
-    this.ws.onclose = onClose;
+
+    ws.onclose = () => {
+      if (this.ws === ws) this.ws = null;
+      this.onState(false);
+      this.scheduleReconnect();
+    };
+
+    ws.onerror = () => ws.close();
+  }
+
+  private scheduleReconnect(): void {
+    if (this.closed || this.timer !== null) return;
+
+    const wait = Math.min(CTL_RETRY_MAX_MS, CTL_RETRY_BASE_MS * 2 ** this.retry);
+    this.retry = Math.min(this.retry + 1, 6);
+
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.connect();
+    }, wait);
   }
 
   close(): void {
-    this.ws.close();
+    this.closed = true;
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = null;
+    this.ws?.close();
   }
 }
 
