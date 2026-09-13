@@ -40,6 +40,7 @@ services:
       BROWCORD_ALLOW_USERS: ${BROWCORD_ALLOW_USERS:-}
       BROWCORD_FIXED_ROOM: ${BROWCORD_FIXED_ROOM:-main}
       BROWCORD_ROOM_IDLE: ${BROWCORD_ROOM_IDLE:-24h}
+      BROWCORD_SESSION_TTL: ${BROWCORD_SESSION_TTL:-8h}
     networks:
       proxy:
       rooms:

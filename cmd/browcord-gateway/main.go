@@ -33,6 +33,7 @@ func main() {
 		AllowGuilds:  splitList(os.Getenv("BROWCORD_ALLOW_GUILDS")),
 		AllowUsers:   splitList(os.Getenv("BROWCORD_ALLOW_USERS")),
 		RoomIdle:     envDuration("BROWCORD_ROOM_IDLE", 60*time.Second),
+		SessionTTL:   envDuration("BROWCORD_SESSION_TTL", 8*time.Hour),
 		DevIdentity:  os.Getenv("BROWCORD_DEV_IDENTITY") == "1",
 		FixedRoom:    os.Getenv("BROWCORD_FIXED_ROOM"),
 	}
