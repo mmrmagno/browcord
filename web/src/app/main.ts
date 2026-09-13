@@ -1,6 +1,7 @@
 import { RevealGate } from "./gate";
 import { InputBridge } from "./input";
 import { Activity, PresenceReporter } from "./presence";
+import { Renewal } from "./renewal";
 import { contentBox } from "./viewport";
 import { decodeSupported, Player } from "./player";
 import {
@@ -149,6 +150,8 @@ function renderCursors(cursors: Cursor[], selfId: string): void {
   );
 }
 
+const SESSION_RENEW_COOLDOWN_MS = 30000;
+
 let typingTimer = 0;
 
 async function main(): Promise<void> {
@@ -168,13 +171,24 @@ async function main(): Promise<void> {
   }
 
   let identity: Identity;
+  let clientId: string;
   try {
-    identity = await authenticate(await clientID());
+    clientId = await clientID();
+    identity = await authenticate(clientId);
   } catch (err) {
     console.error("browcord: join failed", err);
     showOverlay(`Could not join the room.\n${describe(err)}`, false);
     return;
   }
+
+  const renewal = new Renewal(async () => {
+    const fresh = await authenticate(clientId);
+    identity.token = fresh.token;
+    void reportClient(identity, "session-renewed", "reconnects kept failing, minted a new session");
+    return true;
+  }, SESSION_RENEW_COOLDOWN_MS);
+
+  const renew = () => void renewal.request();
 
   const player = new Player(
     el.canvas,
@@ -188,6 +202,10 @@ async function main(): Promise<void> {
       console.error("browcord audio:", message);
       note("Audio stopped", "warn");
       void reportClient(identity, "audio-error", message, player.codec, player.audioPlayed);
+    },
+    (message) => {
+      note("Video hiccup, resyncing", "warn", 2500);
+      void reportClient(identity, "video-restart", message, player.codec, player.decoded);
     },
   );
 
@@ -251,6 +269,7 @@ async function main(): Promise<void> {
       }
       ctlWasOnline = online;
     },
+    renew,
   );
 
   const input = new InputBridge(el.surface, el.canvas, el.keyboard, ctl, () => {
@@ -318,6 +337,7 @@ async function main(): Promise<void> {
       }
       mediaWasOnline = online;
     },
+    renew,
   );
 
   showOverlay("Tap to join.\nEveryone here shares one browser, and everyone can click.", true);

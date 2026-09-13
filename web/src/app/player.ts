@@ -1,4 +1,5 @@
 import { Chunk, ChunkType, codecFromParameterSets } from "./transport";
+import { RestartBudget } from "./restart";
 
 const AUDIO_BUFFER_MIN_S = 0.04;
 const AUDIO_BUFFER_MAX_S = 0.2;
@@ -11,6 +12,9 @@ const VIDEO_JITTER_K = 3;
 const VIDEO_LEAD_MAX_S = 0.15;
 const VIDEO_QUEUE_MAX = 8;
 const PACE_SWEEP_MS = 32;
+const VIDEO_RESTART_LIMIT = 5;
+const VIDEO_RESTART_WINDOW_MS = 60000;
+const ATTEMPT_HISTORY_MAX = 8;
 
 export class Player {
   private ctx: CanvasRenderingContext2D;
@@ -34,6 +38,7 @@ export class Player {
   private audioArrival = 0;
   private audioSamples = 0;
   private audioNeed = AUDIO_BUFFER_MIN_S;
+  private restarts = new RestartBudget(VIDEO_RESTART_LIMIT, VIDEO_RESTART_WINDOW_MS);
 
   decoded = 0;
   dropped = 0;
@@ -52,11 +57,13 @@ export class Player {
   syncSkewMs = 0;
   audioOffsetMs = 0;
   videoOffsetMs = 0;
+  videoRestarts = 0;
 
   constructor(
     private canvas: HTMLCanvasElement,
     private onError: (message: string) => void,
     private onAudioError: (message: string) => void = () => {},
+    private onRecover: (message: string) => void = () => {},
   ) {
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) throw new Error("2d canvas unavailable");
@@ -179,8 +186,16 @@ export class Player {
 
   private onDecoderFailure(err: unknown): void {
     this.attempts.push(`${this.codec} failed: ${err}`);
+    while (this.attempts.length > ATTEMPT_HISTORY_MAX) this.attempts.shift();
 
     if (this.decoded > 0) {
+      if (this.restarts.take(Date.now())) {
+        this.videoRestarts++;
+        this.drain();
+        this.applyCandidate();
+        this.onRecover(`video decoder restarted after ${err}`);
+        return;
+      }
       this.onError(`video decoder stopped: ${err}`);
       return;
     }

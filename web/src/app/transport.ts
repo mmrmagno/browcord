@@ -2,6 +2,7 @@ export const HEADER_SIZE = 13;
 
 const CTL_RETRY_BASE_MS = 500;
 const CTL_RETRY_MAX_MS = 10000;
+const STALE_AFTER_FAILURES = 3;
 
 export const enum ChunkType {
   VideoKey = 1,
@@ -62,6 +63,21 @@ export function activityClient(): ActivitySdk | null {
   return activitySdk;
 }
 
+type DiscordSdk = InstanceType<(typeof import("@discord/embedded-app-sdk"))["DiscordSDK"]>;
+
+let sdkInstance: DiscordSdk | null = null;
+
+async function discordSdk(clientId: string): Promise<DiscordSdk> {
+  if (sdkInstance) return sdkInstance;
+
+  const { DiscordSDK } = await import("@discord/embedded-app-sdk");
+  const sdk = new DiscordSDK(clientId);
+  await sdk.ready();
+  sdkInstance = sdk;
+
+  return sdk;
+}
+
 export function wsURL(path: string, query: Record<string, string>): string {
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   const search = new URLSearchParams(query).toString();
@@ -84,9 +100,7 @@ export async function authenticate(clientId: string): Promise<Identity> {
   let guildId = params.get("guild_id") ?? "";
 
   if (inDiscord) {
-    const { DiscordSDK } = await import("@discord/embedded-app-sdk");
-    const sdk = new DiscordSDK(clientId);
-    await sdk.ready();
+    const sdk = await discordSdk(clientId);
 
     try {
       const granted = await sdk.commands.authorize({
@@ -161,15 +175,18 @@ export class MediaSocket {
   private retry = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  private onStale: () => void;
 
   constructor(
     identity: Identity,
     onChunk: (c: Chunk) => void,
     onState: (online: boolean) => void = () => {},
+    onStale: () => void = () => {},
   ) {
     this.identity = identity;
     this.onChunk = onChunk;
     this.onState = onState;
+    this.onStale = onStale;
     this.connect();
   }
 
@@ -209,6 +226,7 @@ export class MediaSocket {
 
     const wait = Math.min(CTL_RETRY_MAX_MS, CTL_RETRY_BASE_MS * 2 ** this.retry);
     this.retry = Math.min(this.retry + 1, 6);
+    if (this.retry >= STALE_AFTER_FAILURES) this.onStale();
 
     this.timer = setTimeout(() => {
       this.timer = null;
@@ -234,15 +252,18 @@ export class ControlSocket {
   private retry = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  private onStale: () => void;
 
   constructor(
     identity: Identity,
     onMessage: (msg: Record<string, unknown>) => void,
     onState: (online: boolean) => void = () => {},
+    onStale: () => void = () => {},
   ) {
     this.identity = identity;
     this.onMessage = onMessage;
     this.onState = onState;
+    this.onStale = onStale;
     this.connect();
   }
 
@@ -283,6 +304,7 @@ export class ControlSocket {
 
     const wait = Math.min(CTL_RETRY_MAX_MS, CTL_RETRY_BASE_MS * 2 ** this.retry);
     this.retry = Math.min(this.retry + 1, 6);
+    if (this.retry >= STALE_AFTER_FAILURES) this.onStale();
 
     this.timer = setTimeout(() => {
       this.timer = null;
