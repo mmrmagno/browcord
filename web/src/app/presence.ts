@@ -62,6 +62,24 @@ export function describeActivity(
   };
 }
 
+function detail(err: unknown): string {
+  if (err instanceof Error) return `${err.name}: ${err.message}`;
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") {
+    const o = err as Record<string, unknown>;
+    const parts = ["code", "message", "error", "name"]
+      .map((k) => (o[k] === undefined ? "" : `${k}=${String(o[k])}`))
+      .filter(Boolean);
+    if (parts.length) return parts.join(" ");
+    try {
+      return JSON.stringify(err).slice(0, 300);
+    } catch {
+      return "unserialisable error object";
+    }
+  }
+  return String(err);
+}
+
 export type SendActivity = (activity: Activity) => Promise<unknown>;
 
 export class PresenceReporter {
@@ -137,7 +155,7 @@ export class PresenceReporter {
       this.updates++;
     } catch (err) {
       this.stopped = true;
-      this.onError(`setActivity: ${err}`);
+      this.onError(`setActivity: ${detail(err)}`);
     }
   }
 }
