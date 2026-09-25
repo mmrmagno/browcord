@@ -23,20 +23,20 @@ layers_of_container() {
 
 needs_recreate() {
   local service="$1" container="$2"
-  local image running pulled want have state
+  local ref running pulled want have
 
   if [[ "$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null || echo false)" != "true" ]]; then
     return 0
   fi
 
-  image="$(docker compose config --images "$service" | head -1)"
+  ref="$(docker inspect --format '{{.Config.Image}}' "$container" 2>/dev/null || true)"
   running="$(layers_of_container "$container")"
-  pulled="$(layers_of_image "$image")"
-  if [[ -z "$running" || -z "$pulled" || "$running" != "$pulled" ]]; then
+  pulled="$(layers_of_image "$ref")"
+  if [[ -z "$ref" || -z "$running" || -z "$pulled" || "$running" != "$pulled" ]]; then
     return 0
   fi
 
-  want="$(docker compose config --hash "$service" | awk '{print $2}')"
+  want="$(docker compose config --hash "$service" | awk -v s="$service" '$1 == s { print $2 }')"
   have="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.config-hash"}}' "$container" 2>/dev/null || true)"
   if [[ -z "$want" || "$want" != "$have" ]]; then
     return 0
