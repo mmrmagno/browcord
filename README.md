@@ -38,6 +38,26 @@ room. Any site that works in Chrome works, because it is Chrome.
 uBlock Origin Lite is installed through enterprise policy, and the agent keeps
 exactly one tab open, so popups get closed instead of quietly stealing the input.
 
+You can also draw on the screen. A toolbar sits at the bottom of the stage once
+you have joined:
+
+| Control | What it does |
+|---|---|
+| Pen | Toggles drawing. Your clicks draw instead of reaching the page |
+| Eye | Hides drawings for you only, without affecting anyone else |
+| Swatches | Pick your colour, shown while the pen is on |
+| Erase mine | Removes only your own strokes |
+| Erase all | Wipes the room, second tap to confirm |
+
+Your colour applies to your ghost cursor and your ink together, and it travels
+over the wire rather than being derived locally, so everyone sees the same one.
+Strokes stay until somebody clears them, and a late arrival is sent the board as
+it currently stands.
+
+With the pen on, ghost cursors still move and pinch or ctrl+wheel zoom still
+work, so you can point at something while annotating it. Plain scrolling is
+swallowed, otherwise the page would slide out from under your marks.
+
 ## How it works
 
 ```
@@ -257,9 +277,11 @@ to `internal/capture`, so an upstream API break touches one file.
 ## Status
 
 Working and in use: video, audio, A/V sync, input, navigation, Discord OAuth with
-a guild allow list, ad blocking, and touch on mobile. Both sockets reconnect with
-backoff, the client rebuilds its decoder if it dies mid stream, and an expired
-session is renewed rather than retried forever.
+a guild allow list, ad blocking, shared drawing with a colour per person, and
+touch on mobile. Both sockets reconnect with backoff, the client rebuilds its
+decoder if it dies mid stream, and an expired session is renewed rather than
+retried forever. The room container is supervised, so a dead browser stops the
+container and restarts it rather than streaming a frozen picture forever.
 
 Not done yet:
 
