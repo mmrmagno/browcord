@@ -21,8 +21,9 @@ import (
 )
 
 var (
-	ctlPingInterval = 25 * time.Second
-	ctlPingTimeout  = 10 * time.Second
+	ctlPingInterval      = 25 * time.Second
+	ctlPingTimeout       = 10 * time.Second
+	canvasRepairInterval = 400 * time.Millisecond
 )
 
 type Config struct {
@@ -426,6 +427,9 @@ func (g *Gateway) viewerCtl(w http.ResponseWriter, r *http.Request) {
 		ping := time.NewTicker(ctlPingInterval)
 		defer ping.Stop()
 
+		repair := time.NewTicker(canvasRepairInterval)
+		defer repair.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -435,6 +439,14 @@ func (g *Gateway) viewerCtl(w http.ResponseWriter, r *http.Request) {
 				err := conn.Ping(deadline)
 				cancel()
 				if err != nil {
+					return
+				}
+			case <-repair.C:
+				if !v.TakeCanvasRepair() {
+					continue
+				}
+				payload := wire.ServerMessage{Type: wire.CtlCanvas, Strokes: rm.InkSnapshot()}.Encode()
+				if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
 					return
 				}
 			case payload, open := <-v.Ctl:
@@ -487,6 +499,37 @@ func (g *Gateway) handleViewerMessage(ctx context.Context, rm *room.Room, sess a
 	case wire.CtlPointer:
 		rm.SetCursor(sess.UserID, msg.X, msg.Y)
 		g.broadcastCursors(rm)
+		return
+
+	case wire.CtlStroke:
+		last := len(msg.Points)
+		rm.SetCursor(sess.UserID, msg.Points[last-2], msg.Points[last-1])
+		stroke, ok := rm.AppendInk(sess.UserID, msg.Seq, msg.Points)
+		if ok {
+			rm.BroadcastInk(wire.ServerMessage{
+				Type:    wire.CtlDraw,
+				Strokes: []room.Stroke{stroke},
+			}.Encode())
+		}
+		g.broadcastCursors(rm)
+		return
+
+	case wire.CtlClear:
+		if msg.Scope == wire.ScopeAll {
+			rm.ClearAllInk()
+		} else {
+			rm.ClearInk(sess.UserID)
+		}
+		rm.BroadcastInk(wire.ServerMessage{
+			Type:    wire.CtlCanvas,
+			Strokes: rm.InkSnapshot(),
+		}.Encode())
+		return
+
+	case wire.CtlColor:
+		rm.SetColor(sess.UserID, msg.Color)
+		g.broadcastCursors(rm)
+		g.broadcastPresence(rm)
 		return
 
 	case wire.CtlKey:

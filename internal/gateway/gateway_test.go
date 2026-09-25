@@ -464,3 +464,111 @@ func TestStatsNeedsTheAgentToken(t *testing.T) {
 		t.Error("authenticated stats omitted the per room detail")
 	}
 }
+
+func assertAgentSilent(t *testing.T, agent *websocket.Conn) {
+	t.Helper()
+
+	quiet, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	typ, data, err := agent.Read(quiet)
+	if err == nil {
+		t.Fatalf("the message reached the agent as %v %q; Chromium would answer with an error toast on every frame", typ, data)
+	}
+}
+
+func TestStrokeIsBroadcastAndNeverReachesTheAgent(t *testing.T) {
+	_, srv := newTestGateway(t)
+	token, userID := mintSession(t, srv, "room-ink")
+
+	agent := wsDial(t, wsURLOf(srv, "/agent", "room=room-ink"), agentHeader())
+	viewer := wsDial(t, wsURLOf(srv, "/ws/ctl", "room=room-ink&token="+token), nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := viewer.Write(ctx, websocket.MessageText,
+		[]byte(`{"type":"stroke","seq":1,"points":[0.25,0.25,0.5,0.5]}`)); err != nil {
+		t.Fatalf("viewer write: %v", err)
+	}
+
+	raw := readUntil(t, ctx, viewer, wire.CtlDraw)
+
+	var msg struct {
+		Strokes []struct {
+			UserID string    `json:"userId"`
+			Points []float64 `json:"points"`
+		} `json:"strokes"`
+	}
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("decode draw: %v", err)
+	}
+	if len(msg.Strokes) != 1 {
+		t.Fatalf("draw carried %d strokes, want 1", len(msg.Strokes))
+	}
+	if msg.Strokes[0].UserID != userID {
+		t.Errorf("stroke attributed to %q, want %q", msg.Strokes[0].UserID, userID)
+	}
+	if len(msg.Strokes[0].Points) != 4 {
+		t.Errorf("stroke carried %d coordinates, want 4", len(msg.Strokes[0].Points))
+	}
+
+	assertAgentSilent(t, agent)
+}
+
+func TestClearIsBroadcastAsACanvasAndNeverReachesTheAgent(t *testing.T) {
+	_, srv := newTestGateway(t)
+	token, _ := mintSession(t, srv, "room-clear")
+
+	agent := wsDial(t, wsURLOf(srv, "/agent", "room=room-clear"), agentHeader())
+	viewer := wsDial(t, wsURLOf(srv, "/ws/ctl", "room=room-clear&token="+token), nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := viewer.Write(ctx, websocket.MessageText,
+		[]byte(`{"type":"clear","scope":"all"}`)); err != nil {
+		t.Fatalf("viewer write: %v", err)
+	}
+
+	readUntil(t, ctx, viewer, wire.CtlCanvas)
+	assertAgentSilent(t, agent)
+}
+
+func TestColourIsBroadcastAndNeverReachesTheAgent(t *testing.T) {
+	_, srv := newTestGateway(t)
+	token, _ := mintSession(t, srv, "room-colour")
+
+	agent := wsDial(t, wsURLOf(srv, "/agent", "room=room-colour"), agentHeader())
+	viewer := wsDial(t, wsURLOf(srv, "/ws/ctl", "room=room-colour&token="+token), nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := viewer.Write(ctx, websocket.MessageText, []byte(`{"type":"color","color":5}`)); err != nil {
+		t.Fatalf("viewer write: %v", err)
+	}
+
+	seen := []int{}
+	for i := 0; i < 10; i++ {
+		raw := readUntil(t, ctx, viewer, wire.CtlPresence)
+
+		var msg struct {
+			Presence []struct {
+				Color int `json:"color"`
+			} `json:"presence"`
+		}
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			t.Fatalf("decode presence: %v", err)
+		}
+		if len(msg.Presence) > 0 {
+			seen = append(seen, msg.Presence[0].Color)
+			if msg.Presence[0].Color == 5 {
+				assertAgentSilent(t, agent)
+				return
+			}
+		}
+	}
+
+	t.Fatalf("presence colours seen were %v, want the chosen colour 5 to reach other viewers", seen)
+}
