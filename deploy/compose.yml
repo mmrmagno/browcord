@@ -102,14 +102,14 @@ services:
     security_opt:
       - no-new-privileges:true
       - seccomp=./seccomp/chromium.json
-    pids_limit: 512
-    mem_limit: 3g
-    memswap_limit: 3g
+    pids_limit: 768
+    mem_limit: 4g
+    memswap_limit: 4g
     cpus: 2.5
     shm_size: 1g
     tmpfs:
       - /tmp:size=512m,mode=1777
-      - /profile:size=512m,mode=0700,uid=10001,gid=10001
+      - /profile:size=768m,mode=0700,uid=10001,gid=10001
       - /home/browcord:size=64m,mode=0700,uid=10001,gid=10001
     environment:
       ROOM_WIDTH: ${ROOM_WIDTH:-1280}
@@ -122,6 +122,14 @@ services:
       BROWCORD_ROOM_ID: ${BROWCORD_FIXED_ROOM:-main}
       BROWCORD_AGENT_TOKEN: ${BROWCORD_AGENT_TOKEN:?}
     restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://127.0.0.1:9222/json/version >/dev/null && xdpyinfo -display :0 >/dev/null 2>&1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
     logging:
       driver: json-file
       options:

@@ -15,7 +15,7 @@ trap cleanup EXIT
 mkdir -p /tmp/pulse /tmp/runtime
 chmod 0700 /tmp/runtime
 
-Xvfb "${DISPLAY}" -screen 0 "${WIDTH}x${HEIGHT}x24" -nolisten tcp -nolisten unix +extension RANDR &
+Xvfb "${DISPLAY}" -screen 0 "${WIDTH}x${HEIGHT}x24" -nolisten tcp -noreset +extension RANDR &
 
 for _ in $(seq 1 50); do
   if xdpyinfo -display "${DISPLAY}" >/dev/null 2>&1; then break; fi
@@ -54,4 +54,10 @@ chromium \
 
 sleep 3
 
-exec browcord-agent
+browcord-agent &
+
+status=0
+wait -n || status=$?
+
+echo "room: a supervised process exited with status ${status}, stopping the container so it restarts" >&2
+exit 1
