@@ -28,6 +28,8 @@ export class InputBridge {
   private longPressTimer = 0;
   private touchStart: { x: number; y: number; at: number } | null = null;
   private pinchDistance = 0;
+  private drawing = false;
+  private penDown = false;
 
   view: View = { scale: 1, offsetX: 0, offsetY: 0 };
 
@@ -37,10 +39,22 @@ export class InputBridge {
     private textInput: HTMLInputElement,
     private ctl: ControlSocket,
     private onViewChange: () => void,
+    private onDraw: (phase: string, x: number, y: number) => void = () => {},
   ) {
     this.attachPointer();
     this.attachKeyboard();
     this.attachTouch();
+  }
+
+  setDrawing(on: boolean): void {
+    this.drawing = on;
+    if (!on) this.endStroke();
+  }
+
+  private endStroke(): void {
+    if (!this.penDown) return;
+    this.penDown = false;
+    this.onDraw("end", 0, 0);
   }
 
   private normalize(clientX: number, clientY: number): { x: number; y: number } {
@@ -57,6 +71,13 @@ export class InputBridge {
   private attachPointer(): void {
     this.surface.addEventListener("pointermove", (e) => {
       if (e.pointerType === "touch") return;
+
+      if (this.drawing && this.penDown) {
+        const { x, y } = this.normalize(e.clientX, e.clientY);
+        this.onDraw("move", x, y);
+        return;
+      }
+
       const now = performance.now();
       if (now - this.lastPointerAt < 1000 / POINTER_HZ) return;
       this.lastPointerAt = now;
@@ -68,6 +89,14 @@ export class InputBridge {
     this.surface.addEventListener("pointerdown", (e) => {
       if (e.pointerType === "touch") return;
       e.preventDefault();
+
+      if (this.drawing) {
+        this.penDown = true;
+        const { x, y } = this.normalize(e.clientX, e.clientY);
+        this.onDraw("start", x, y);
+        return;
+      }
+
       this.textInput.focus({ preventScroll: true });
       const { x, y } = this.normalize(e.clientX, e.clientY);
       this.ctl.send({ type: "click", x, y, button: e.button, down: true });
@@ -75,9 +104,20 @@ export class InputBridge {
 
     this.surface.addEventListener("pointerup", (e) => {
       if (e.pointerType === "touch") return;
+
+      if (this.drawing) {
+        const { x, y } = this.normalize(e.clientX, e.clientY);
+        this.penDown = false;
+        this.onDraw("end", x, y);
+        return;
+      }
+
       const { x, y } = this.normalize(e.clientX, e.clientY);
       this.ctl.send({ type: "click", x, y, button: e.button, down: false });
     });
+
+    this.surface.addEventListener("pointercancel", () => this.endStroke());
+    this.surface.addEventListener("pointerleave", () => this.endStroke());
 
     this.surface.addEventListener("contextmenu", (e) => e.preventDefault());
 
@@ -90,6 +130,8 @@ export class InputBridge {
           return;
         }
         e.preventDefault();
+        if (this.drawing) return;
+
         const { x, y } = this.normalize(e.clientX, e.clientY);
         this.ctl.send({ type: "scroll", x, y, dx: -e.deltaX, dy: -e.deltaY });
       },
@@ -139,6 +181,7 @@ export class InputBridge {
         if (e.touches.length === 2) {
           this.pinchDistance = distance(e.touches[0], e.touches[1]);
           this.clearLongPress();
+          this.endStroke();
           return;
         }
 
@@ -147,6 +190,14 @@ export class InputBridge {
         e.preventDefault();
 
         this.touchStart = { x: t.clientX, y: t.clientY, at: performance.now() };
+
+        if (this.drawing) {
+          this.penDown = true;
+          const start = this.normalize(t.clientX, t.clientY);
+          this.onDraw("start", start.x, start.y);
+          return;
+        }
+
         const { x, y } = this.normalize(t.clientX, t.clientY);
 
         this.longPressTimer = window.setTimeout(() => {
@@ -176,6 +227,14 @@ export class InputBridge {
         const t = e.touches[0];
         if (!t || !this.touchStart) return;
 
+        if (this.drawing && this.penDown) {
+          e.preventDefault();
+          this.touchStart = { x: t.clientX, y: t.clientY, at: this.touchStart.at };
+          const moved = this.normalize(t.clientX, t.clientY);
+          this.onDraw("move", moved.x, moved.y);
+          return;
+        }
+
         const movedX = t.clientX - this.touchStart.x;
         const movedY = t.clientY - this.touchStart.y;
         if (Math.abs(movedX) + Math.abs(movedY) > 10) this.clearLongPress();
@@ -192,6 +251,15 @@ export class InputBridge {
       this.pinchDistance = 0;
       if (!this.touchStart) return;
       this.clearLongPress();
+
+      if (this.drawing) {
+        this.penDown = false;
+        const end = this.normalize(this.touchStart.x, this.touchStart.y);
+        this.onDraw("end", end.x, end.y);
+        this.touchStart = null;
+        e.preventDefault();
+        return;
+      }
 
       const heldFor = performance.now() - this.touchStart.at;
       if (heldFor < 500) {

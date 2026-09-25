@@ -1,5 +1,7 @@
 import { RevealGate } from "./gate";
 import { InputBridge } from "./input";
+import { FLUSH_MS, InkStore, Stroke, StrokeBatcher } from "./ink";
+import { PALETTE, colorAt } from "./palette";
 import { Activity, PresenceReporter } from "./presence";
 import { Renewal } from "./renewal";
 import { contentBox } from "./viewport";
@@ -20,11 +22,13 @@ interface Cursor {
   name: string;
   x: number;
   y: number;
+  color?: number;
 }
 
 interface Participant {
   userId: string;
   name: string;
+  color?: number;
 }
 
 const el = {
@@ -44,12 +48,31 @@ const el = {
   overlayText: document.getElementById("overlay-text") as HTMLDivElement,
   join: document.getElementById("join") as HTMLButtonElement,
   keyboard: document.getElementById("keyboard") as HTMLInputElement,
+  ink: document.getElementById("ink") as HTMLCanvasElement,
+  tools: document.getElementById("tools") as HTMLDivElement,
+  pen: document.getElementById("pen") as HTMLButtonElement,
+  eye: document.getElementById("eye") as HTMLButtonElement,
+  swatches: document.getElementById("swatches") as HTMLDivElement,
+  clearMine: document.getElementById("clear-mine") as HTMLButtonElement,
+  clearAll: document.getElementById("clear-all") as HTMLButtonElement,
 };
 
-function colorFor(userId: string): string {
-  let hash = 0;
-  for (let i = 0; i < userId.length; i++) hash = (hash * 31 + userId.charCodeAt(i)) | 0;
-  return `hsl(${Math.abs(hash) % 360} 85% 64%)`;
+const INK_VISIBLE_KEY = "browcord.ink.visible";
+
+function readInkVisible(): boolean {
+  try {
+    return window.localStorage.getItem(INK_VISIBLE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function writeInkVisible(visible: boolean): void {
+  try {
+    window.localStorage.setItem(INK_VISIBLE_KEY, visible ? "1" : "0");
+  } catch {
+    return;
+  }
 }
 
 function describe(err: unknown): string {
@@ -119,12 +142,37 @@ function renderPresence(people: Participant[], selfId: string): void {
       .map((p) => {
       const pip = document.createElement("div");
       pip.className = "pip";
-      pip.style.setProperty("--pip", colorFor(p.userId));
+      pip.style.setProperty("--pip", colorAt(p.color ?? 0));
       pip.textContent = (p.name || "?").slice(0, 1);
       pip.title = p.name;
       return pip;
     }),
   );
+}
+
+function renderInk(store: InkStore): void {
+  const ctx = el.ink.getContext("2d");
+  if (!ctx) return;
+
+  ctx.clearRect(0, 0, el.ink.width, el.ink.height);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = 3;
+
+  for (const stroke of store.all()) {
+    if (stroke.points.length < 2) continue;
+
+    ctx.strokeStyle = colorAt(stroke.color);
+    ctx.beginPath();
+    ctx.moveTo(stroke.points[0] * el.ink.width, stroke.points[1] * el.ink.height);
+    for (let i = 2; i < stroke.points.length; i += 2) {
+      ctx.lineTo(stroke.points[i] * el.ink.width, stroke.points[i + 1] * el.ink.height);
+    }
+    if (stroke.points.length === 2) {
+      ctx.lineTo(stroke.points[0] * el.ink.width + 0.1, stroke.points[1] * el.ink.height);
+    }
+    ctx.stroke();
+  }
 }
 
 function renderCursors(cursors: Cursor[], selfId: string): void {
@@ -143,7 +191,7 @@ function renderCursors(cursors: Cursor[], selfId: string): void {
         node.className = "cursor";
         node.style.left = `${box.left + c.x * box.width}px`;
         node.style.top = `${box.top + c.y * box.height}px`;
-        node.style.setProperty("--cursor", colorFor(c.userId));
+        node.style.setProperty("--cursor", colorAt(c.color ?? 0));
         node.textContent = c.name;
         return node;
       }),
@@ -220,6 +268,19 @@ async function main(): Promise<void> {
 
   let ctlWasOnline = true;
 
+  const ink = new InkStore();
+  const batcher = new StrokeBatcher();
+  let strokeSeq = Math.floor(Math.random() * 1e6);
+  let myColor = 0;
+
+  function markSwatch(index: number): void {
+    myColor = index;
+    for (const node of Array.from(el.swatches.children)) {
+      const button = node as HTMLButtonElement;
+      button.setAttribute("aria-pressed", button.dataset.index === String(index) ? "true" : "false");
+    }
+  }
+
   const ctl = new ControlSocket(
     identity,
     (msg) => {
@@ -232,8 +293,21 @@ async function main(): Promise<void> {
           const people = (msg.presence as Participant[]) ?? [];
           renderPresence(people, identity.userId);
           presence?.setViewers(people.length);
+
+          const me = people.find((p) => p.userId === identity.userId);
+          if (me?.color !== undefined) markSwatch(me.color);
           break;
         }
+
+        case "canvas":
+          ink.reset((msg.strokes as Stroke[]) ?? []);
+          renderInk(ink);
+          break;
+
+        case "draw":
+          ink.apply((msg.strokes as Stroke[]) ?? []);
+          renderInk(ink);
+          break;
 
         case "nav": {
           const nav = msg.nav as { url?: string; loading?: boolean } | undefined;
@@ -261,6 +335,8 @@ async function main(): Promise<void> {
       }
     },
     (online) => {
+      if (online) ctl.send({ type: "color", color: myColor });
+
       if (online && !ctlWasOnline) {
         note("Input reconnected", "live", 2500);
       } else if (!online && ctlWasOnline) {
@@ -272,11 +348,42 @@ async function main(): Promise<void> {
     renew,
   );
 
-  const input = new InputBridge(el.surface, el.canvas, el.keyboard, ctl, () => {
-    const { scale, offsetX, offsetY } = input.view;
-    el.surface.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
-    el.zoom.hidden = scale === 1;
-  });
+  function sendBatch(points: number[] | null): void {
+    if (!points || points.length === 0) return;
+    ctl.send({ type: "stroke", seq: strokeSeq, points });
+  }
+
+  const input = new InputBridge(
+    el.surface,
+    el.canvas,
+    el.keyboard,
+    ctl,
+    () => {
+      const { scale, offsetX, offsetY } = input.view;
+      el.surface.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+      el.zoom.hidden = scale === 1;
+    },
+    (phase, x, y) => {
+      const now = performance.now();
+
+      if (phase === "start") {
+        strokeSeq = (strokeSeq + 1) % 1000000;
+        batcher.begin(now);
+        sendBatch(batcher.push(x, y, now));
+        return;
+      }
+
+      if (phase === "move") {
+        sendBatch(batcher.push(x, y, now));
+        return;
+      }
+
+      sendBatch(batcher.flush(now));
+      batcher.end();
+    },
+  );
+
+  window.setInterval(() => sendBatch(batcher.flush(performance.now())), FLUSH_MS);
 
   el.zoom.addEventListener("click", () => input.resetZoom());
   el.back.addEventListener("click", () => ctl.send({ type: "back" }));
@@ -300,6 +407,73 @@ async function main(): Promise<void> {
     el.keyboard.focus({ preventScroll: true });
   });
 
+  for (let i = 0; i < PALETTE.length; i++) {
+    const swatch = document.createElement("button");
+    swatch.className = "swatch";
+    swatch.dataset.index = String(i);
+    swatch.style.setProperty("--sw", PALETTE[i]);
+    swatch.title = "Draw in this colour";
+    swatch.setAttribute("aria-label", `Colour ${i + 1}`);
+    swatch.setAttribute("aria-pressed", "false");
+    swatch.addEventListener("click", () => {
+      markSwatch(i);
+      ctl.send({ type: "color", color: i });
+    });
+    el.swatches.appendChild(swatch);
+  }
+
+  let inkVisible = readInkVisible();
+
+  function applyInkVisible(): void {
+    el.ink.hidden = !inkVisible;
+    el.eye.setAttribute("aria-pressed", inkVisible ? "true" : "false");
+    el.eye.title = inkVisible ? "Hide drawings for me" : "Show drawings";
+  }
+
+  applyInkVisible();
+
+  el.eye.addEventListener("click", () => {
+    inkVisible = !inkVisible;
+    writeInkVisible(inkVisible);
+    applyInkVisible();
+  });
+
+  let drawing = false;
+
+  el.pen.addEventListener("click", () => {
+    drawing = !drawing;
+    input.setDrawing(drawing);
+    el.pen.setAttribute("aria-pressed", drawing ? "true" : "false");
+    el.swatches.hidden = !drawing;
+    el.surface.style.cursor = drawing ? "crosshair" : "";
+
+    if (drawing && !inkVisible) {
+      inkVisible = true;
+      writeInkVisible(true);
+      applyInkVisible();
+    }
+  });
+
+  el.clearMine.addEventListener("click", () => ctl.send({ type: "clear", scope: "mine" }));
+
+  let confirmTimer = 0;
+
+  el.clearAll.addEventListener("click", () => {
+    if (!confirmTimer) {
+      el.clearAll.textContent = "Sure?";
+      confirmTimer = window.setTimeout(() => {
+        el.clearAll.textContent = "Erase all";
+        confirmTimer = 0;
+      }, 2000);
+      return;
+    }
+
+    clearTimeout(confirmTimer);
+    confirmTimer = 0;
+    el.clearAll.textContent = "Erase all";
+    ctl.send({ type: "clear", scope: "all" });
+  });
+
   let announced = false;
   let mediaWasOnline = true;
   let chunks = 0;
@@ -307,6 +481,7 @@ async function main(): Promise<void> {
   const gate = new RevealGate(() => {
     el.overlay.hidden = true;
     el.note.hidden = true;
+    el.tools.hidden = false;
     el.keyboard.focus({ preventScroll: true });
   });
 

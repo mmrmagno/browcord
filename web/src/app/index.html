@@ -151,6 +151,16 @@
       #surface { position: absolute; inset: 0; transform-origin: 0 0; }
       #screen { width: 100%; height: 100%; display: block; object-fit: contain; }
 
+      #ink {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: contain;
+        pointer-events: none;
+      }
+
       #cursors { position: absolute; inset: 0; pointer-events: none; }
       .cursor {
         position: absolute;
@@ -185,6 +195,55 @@
       }
       #typing { left: 12px; }
       #zoom { right: 12px; color: var(--text); font-family: inherit; cursor: pointer; }
+
+      #tools {
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        padding: 4px 6px;
+      }
+      .tool-btn {
+        display: grid;
+        place-items: center;
+        width: 27px;
+        height: 27px;
+        padding: 0;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--dim);
+        cursor: pointer;
+        transition: background 120ms ease, color 120ms ease;
+      }
+      .tool-btn:hover { background: var(--field-hi); color: var(--text); }
+      .tool-btn[aria-pressed="true"] { background: var(--field-hi); color: var(--text); }
+      .tool-btn svg { width: 15px; height: 15px; display: block; }
+      .tool-sep { width: 1px; height: 17px; background: var(--line); margin: 0 3px; }
+      .tool-text {
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--dim);
+        font: inherit;
+        font-size: 11.5px;
+        padding: 5px 7px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .tool-text:hover { background: var(--field-hi); color: var(--text); }
+      #swatches { display: flex; align-items: center; gap: 3px; padding-left: 3px; }
+      .swatch {
+        width: 16px;
+        height: 16px;
+        padding: 0;
+        border-radius: 50%;
+        border: 2px solid transparent;
+        background: var(--sw);
+        cursor: pointer;
+      }
+      .swatch[aria-pressed="true"] { border-color: var(--text); }
 
       #overlay {
         position: absolute;
@@ -271,10 +330,24 @@
       <div id="stage">
         <div id="surface">
           <canvas id="screen" width="1280" height="720"></canvas>
+          <canvas id="ink" width="1280" height="720"></canvas>
           <div id="cursors"></div>
         </div>
         <div id="typing" class="float" hidden></div>
         <button id="zoom" class="float" hidden>Reset zoom</button>
+
+        <div id="tools" class="float" hidden>
+          <button id="pen" class="tool-btn" title="Draw on the screen" aria-pressed="false" aria-label="Draw">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1 9-9-3-3-9 9z"/><path d="M14 7l3 3"/></svg>
+          </button>
+          <button id="eye" class="tool-btn" title="Hide drawings for me" aria-pressed="true" aria-label="Hide drawings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg>
+          </button>
+          <div id="swatches" hidden></div>
+          <div class="tool-sep"></div>
+          <button id="clear-mine" class="tool-text">Erase mine</button>
+          <button id="clear-all" class="tool-text">Erase all</button>
+        </div>
 
         <div id="overlay">
           <img src="icon.svg" alt="" />
