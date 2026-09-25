@@ -16,7 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     XDG_RUNTIME_DIR=/tmp/runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      xvfb x11-utils \
+      xvfb x11-utils x11-apps \
       pulseaudio pulseaudio-utils \
       chromium \
       gstreamer1.0-tools \
@@ -33,9 +33,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 ARG UBOLITE_VERSION=2026.907.2003
+ARG UBOLITE_SHA256=56ba6fb728cc272bca1931792b1a4a15963eede4557ea829e5367e85d6057dd9
 RUN mkdir -p /opt/ubolite \
     && curl -fsSL -o /tmp/ubolite.zip \
        "https://github.com/uBlockOrigin/uBOL-home/releases/download/${UBOLITE_VERSION}/uBOLite_${UBOLITE_VERSION}.chromium.zip" \
+    && echo "${UBOLITE_SHA256}  /tmp/ubolite.zip" | sha256sum -c - \
     && unzip -q /tmp/ubolite.zip -d /opt/ubolite \
     && rm /tmp/ubolite.zip \
     && test -f /opt/ubolite/manifest.json
