@@ -310,7 +310,7 @@ func (g *Gateway) clientLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("client[%s/%s] %s: codec=%q decoded=%d detail=%q ua=%q",
+	log.Printf("client[%q/%q] %q: codec=%q decoded=%d detail=%q ua=%q",
 		sess.Name, sess.RoomID, report.Event, report.Codec, report.Decoded, report.Detail, report.Agent)
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
