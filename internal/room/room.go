@@ -22,10 +22,15 @@ type Viewer struct {
 
 	dropped       atomic.Int64
 	needsKeyframe atomic.Bool
+	needsCanvas   atomic.Bool
 }
 
 func (v *Viewer) Dropped() int64 {
 	return v.dropped.Load()
+}
+
+func (v *Viewer) TakeCanvasRepair() bool {
+	return v.needsCanvas.CompareAndSwap(true, false)
 }
 
 type Cursor struct {
@@ -33,6 +38,7 @@ type Cursor struct {
 	Name   string  `json:"name"`
 	X      float64 `json:"x"`
 	Y      float64 `json:"y"`
+	Color  int     `json:"color"`
 }
 
 type NavState struct {
@@ -53,6 +59,11 @@ type Room struct {
 	cursors      map[string]Cursor
 	nav          NavState
 	emptySince   time.Time
+	strokes      []*Stroke
+	pens         map[string]pen
+	colors       map[string]int
+	inkPoints    int
+	nextInkID    uint64
 
 	chunks      atomic.Int64
 	bytes       atomic.Int64
@@ -69,6 +80,8 @@ func New(id string) *Room {
 		ID:         id,
 		viewers:    make(map[string]*Viewer),
 		cursors:    make(map[string]Cursor),
+		pens:       make(map[string]pen),
+		colors:     make(map[string]int),
 		emptySince: time.Now(),
 		Typing:     TypingToken{Hold: 1500 * time.Millisecond},
 	}
@@ -88,6 +101,12 @@ func (r *Room) Join(viewerID, userID, name string) *Viewer {
 	config := r.videoConfig
 	audio := r.audioConfig
 	keyframe := r.lastKeyframe
+	if _, known := r.colors[userID]; !known {
+		r.colors[userID] = r.leastUsedColorLocked(wire.PaletteSize)
+	}
+	if len(r.strokes) > 0 {
+		v.Ctl <- wire.ServerMessage{Type: wire.CtlCanvas, Strokes: r.inkSnapshotLocked()}.Encode()
+	}
 	r.mu.Unlock()
 
 	if config != nil {
@@ -114,6 +133,18 @@ func (r *Room) Leave(viewerID string) {
 
 	delete(r.viewers, viewerID)
 	delete(r.cursors, v.UserID)
+
+	stillHere := false
+	for _, other := range r.viewers {
+		if other.UserID == v.UserID {
+			stillHere = true
+			break
+		}
+	}
+	if !stillHere {
+		delete(r.colors, v.UserID)
+		delete(r.pens, v.UserID)
+	}
 
 	close(v.Media)
 	close(v.Ctl)
@@ -275,6 +306,26 @@ func (r *Room) BroadcastCtl(payload []byte) {
 	}
 }
 
+func (r *Room) BroadcastInk(payload []byte) {
+	r.mu.RLock()
+	viewers := make([]*Viewer, 0, len(r.viewers))
+	for _, v := range r.viewers {
+		viewers = append(viewers, v)
+	}
+	r.mu.RUnlock()
+
+	for _, v := range viewers {
+		func() {
+			defer func() { _ = recover() }()
+			select {
+			case v.Ctl <- payload:
+			default:
+				v.needsCanvas.Store(true)
+			}
+		}()
+	}
+}
+
 func (r *Room) SetCursor(userID string, x, y float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -287,12 +338,13 @@ func (r *Room) SetCursor(userID string, x, y float64) {
 		}
 	}
 
-	r.cursors[userID] = Cursor{UserID: userID, Name: name, X: x, Y: y}
+	r.cursors[userID] = Cursor{UserID: userID, Name: name, X: x, Y: y, Color: r.colors[userID]}
 }
 
 type Participant struct {
 	UserID string `json:"userId"`
 	Name   string `json:"name"`
+	Color  int    `json:"color"`
 }
 
 func (r *Room) Participants() []Participant {
@@ -306,7 +358,7 @@ func (r *Room) Participants() []Participant {
 			continue
 		}
 		seen[v.UserID] = true
-		out = append(out, Participant{UserID: v.UserID, Name: v.Name})
+		out = append(out, Participant{UserID: v.UserID, Name: v.Name, Color: r.colors[v.UserID]})
 	}
 	return out
 }

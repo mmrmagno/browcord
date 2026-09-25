@@ -1,6 +1,7 @@
 package room
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -234,5 +235,207 @@ func TestLeaveDropsCursor(t *testing.T) {
 
 	if len(r.Cursors()) != 0 {
 		t.Error("a departed viewer must not leave a ghost cursor behind")
+	}
+}
+
+func drainCtl(t *testing.T, v *Viewer) []wire.ServerMessage {
+	t.Helper()
+
+	var out []wire.ServerMessage
+	for {
+		select {
+		case payload, open := <-v.Ctl:
+			if !open {
+				return out
+			}
+			var msg wire.ServerMessage
+			if err := json.Unmarshal(payload, &msg); err != nil {
+				t.Fatalf("ctl payload is not a server message: %v", err)
+			}
+			out = append(out, msg)
+		default:
+			return out
+		}
+	}
+}
+
+func TestInkContinuesTheSameStrokeUntilTheSeqChanges(t *testing.T) {
+	r := New("room-ink")
+	r.Join("v1", "user-1", "marcos")
+
+	first, ok := r.AppendInk("user-1", 7, []float64{0.1, 0.1, 0.2, 0.2})
+	if !ok {
+		t.Fatal("first append refused")
+	}
+	same, ok := r.AppendInk("user-1", 7, []float64{0.3, 0.3})
+	if !ok {
+		t.Fatal("continuation refused")
+	}
+	if same.ID != first.ID {
+		t.Errorf("same seq opened stroke %d then %d, want one stroke", first.ID, same.ID)
+	}
+
+	next, ok := r.AppendInk("user-1", 8, []float64{0.4, 0.4})
+	if !ok {
+		t.Fatal("new seq refused")
+	}
+	if next.ID == first.ID {
+		t.Error("a new seq must open a new stroke, not extend the previous one")
+	}
+
+	if got := len(r.InkSnapshot()); got != 2 {
+		t.Errorf("room holds %d strokes, want 2", got)
+	}
+}
+
+func TestInkStopsGrowingAtTheCap(t *testing.T) {
+	r := New("room-ink-cap")
+	r.Join("v1", "user-1", "marcos")
+
+	batch := make([]float64, 128)
+	for i := range batch {
+		batch[i] = 0.5
+	}
+
+	refused := false
+	for seq := 0; seq < 500; seq++ {
+		if _, ok := r.AppendInk("user-1", seq, batch); !ok {
+			refused = true
+			break
+		}
+	}
+
+	if !refused {
+		t.Error("a single user filled the room with ink without ever being refused")
+	}
+
+	total := 0
+	for _, s := range r.InkSnapshot() {
+		total += len(s.Points) / 2
+	}
+	if total > maxInkPointsPerRoom {
+		t.Errorf("room holds %d points, over the %d cap", total, maxInkPointsPerRoom)
+	}
+}
+
+func TestInkReturnsOnlyThePointsItStored(t *testing.T) {
+	r := New("room-ink-partial")
+	r.Join("v1", "user-1", "marcos")
+
+	batch := make([]float64, 2*maxInkPointsPerStroke+40)
+	for i := range batch {
+		batch[i] = 0.5
+	}
+
+	stored, ok := r.AppendInk("user-1", 1, batch)
+	if !ok {
+		t.Fatal("append refused outright")
+	}
+	if len(stored.Points)/2 != maxInkPointsPerStroke {
+		t.Errorf("returned %d points, want the %d actually stored; broadcasting more than was stored desynchronises every client",
+			len(stored.Points)/2, maxInkPointsPerStroke)
+	}
+}
+
+func TestInkPointsAreQuantisedOnStore(t *testing.T) {
+	r := New("room-ink-round")
+	r.Join("v1", "user-1", "marcos")
+
+	stored, ok := r.AppendInk("user-1", 1, []float64{0.1234567890123456, 0.9876543210987654})
+	if !ok {
+		t.Fatal("append refused")
+	}
+	if stored.Points[0] != 0.123 || stored.Points[1] != 0.988 {
+		t.Errorf("stored %v, want coordinates rounded to 3 decimals", stored.Points)
+	}
+}
+
+func TestClearMineLeavesOtherInkAlone(t *testing.T) {
+	r := New("room-clear")
+	r.Join("v1", "user-1", "marcos")
+	r.Join("v2", "user-2", "nona")
+
+	r.AppendInk("user-1", 1, []float64{0.1, 0.1})
+	r.AppendInk("user-2", 1, []float64{0.2, 0.2})
+
+	r.ClearInk("user-1")
+
+	got := r.InkSnapshot()
+	if len(got) != 1 || got[0].UserID != "user-2" {
+		t.Fatalf("after clearing one user the room holds %+v, want only user-2 ink", got)
+	}
+
+	r.ClearAllInk()
+	if got := r.InkSnapshot(); len(got) != 0 {
+		t.Errorf("clear all left %d strokes", len(got))
+	}
+}
+
+func TestLateJoinerGetsTheCanvasOnce(t *testing.T) {
+	r := New("room-replay")
+	r.Join("v1", "user-1", "marcos")
+	r.AppendInk("user-1", 1, []float64{0.1, 0.1, 0.2, 0.2})
+
+	late := r.Join("v2", "user-2", "nona")
+
+	msgs := drainCtl(t, late)
+	if len(msgs) != 1 {
+		t.Fatalf("late joiner received %d ctl messages, want exactly one canvas", len(msgs))
+	}
+	if msgs[0].Type != wire.CtlCanvas {
+		t.Errorf("late joiner got %q, want %q", msgs[0].Type, wire.CtlCanvas)
+	}
+}
+
+func TestSlowViewerIsFlaggedForCanvasRepair(t *testing.T) {
+	r := New("room-slow")
+	v := r.Join("v1", "user-1", "marcos")
+
+	for i := 0; i < ctlBuffer+5; i++ {
+		r.BroadcastInk([]byte(`{"type":"draw"}`))
+	}
+
+	if !v.TakeCanvasRepair() {
+		t.Error("a viewer whose buffer overflowed was not flagged for repair, so its canvas stays wrong forever")
+	}
+	if v.TakeCanvasRepair() {
+		t.Error("the repair flag must clear once taken")
+	}
+}
+
+func TestColourTravelsWithCursorsAndParticipants(t *testing.T) {
+	r := New("room-colour")
+	r.Join("v1", "user-1", "marcos")
+
+	r.SetColor("user-1", 5)
+	r.SetCursor("user-1", 0.5, 0.5)
+
+	cursors := r.Cursors()
+	if len(cursors) != 1 || cursors[0].Color != 5 {
+		t.Errorf("cursors = %+v, want colour 5", cursors)
+	}
+
+	people := r.Participants()
+	if len(people) != 1 || people[0].Color != 5 {
+		t.Errorf("participants = %+v, want colour 5", people)
+	}
+}
+
+func TestLeaveKeepsInkAndHoldsColourWhileAnotherSocketRemains(t *testing.T) {
+	r := New("room-leave")
+	r.Join("media", "user-1", "marcos")
+	r.Join("ctl", "user-1", "marcos")
+
+	r.SetColor("user-1", 3)
+	r.AppendInk("user-1", 1, []float64{0.1, 0.1})
+
+	r.Leave("media")
+	if got := r.Color("user-1"); got != 3 {
+		t.Errorf("colour became %d after one of two sockets left, want it held at 3", got)
+	}
+
+	r.Leave("ctl")
+	if got := len(r.InkSnapshot()); got != 1 {
+		t.Errorf("leaving discarded ink, %d strokes left, want 1", got)
 	}
 }
