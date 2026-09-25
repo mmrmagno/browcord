@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/go-gst/go-gst/pkg/gst"
 	"github.com/mmrmagno/browcord/internal/capture"
 	"github.com/mmrmagno/browcord/internal/cdp"
 	"github.com/mmrmagno/browcord/internal/wire"
@@ -88,26 +89,52 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("agent: start capture: %w", err)
 	}
 
-	go a.watchNavigation(ctx)
-	go a.keepOneTab(ctx, target.ID)
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+
+	fatal := make(chan string, 1)
+	go pipeline.WatchBus(runCtx, func(kind gst.MessageType, detail string) {
+		if kind == gst.MessageWarning {
+			log.Printf("agent: capture warning: %s", detail)
+			return
+		}
+		log.Printf("agent: capture stopped: %s", detail)
+		select {
+		case fatal <- detail:
+			cancelRun()
+		default:
+		}
+	})
+
+	go a.watchNavigation(runCtx)
+	go a.keepOneTab(runCtx, target.ID)
 
 	backoff := time.Second
 	for {
-		err := a.session(ctx)
-		if ctx.Err() != nil {
-			return nil
+		err := a.session(runCtx)
+		if runCtx.Err() != nil {
+			return captureFailure(fatal)
 		}
 		log.Printf("agent: gateway session ended: %v", err)
 
 		select {
-		case <-ctx.Done():
-			return nil
+		case <-runCtx.Done():
+			return captureFailure(fatal)
 		case <-time.After(backoff):
 		}
 
 		if backoff < 15*time.Second {
 			backoff *= 2
 		}
+	}
+}
+
+func captureFailure(fatal chan string) error {
+	select {
+	case detail := <-fatal:
+		return fmt.Errorf("agent: capture pipeline failed: %s", detail)
+	default:
+		return nil
 	}
 }
 
