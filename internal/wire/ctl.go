@@ -8,9 +8,12 @@ import (
 )
 
 const (
-	MaxCtlBytes = 8 << 10
-	MaxTextRune = 4096
-	MaxURLBytes = 2048
+	MaxCtlBytes     = 8 << 10
+	MaxTextRune     = 4096
+	MaxURLBytes     = 2048
+	MaxStrokePoints = 128
+	MaxStrokeSeq    = 1 << 20
+	PaletteSize     = 8
 )
 
 var (
@@ -31,6 +34,9 @@ const (
 	CtlBack     = "back"
 	CtlForward  = "forward"
 	CtlReload   = "reload"
+	CtlStroke   = "stroke"
+	CtlClear    = "clear"
+	CtlColor    = "color"
 
 	CtlCursors  = "cursors"
 	CtlNav      = "nav"
@@ -38,6 +44,13 @@ const (
 	CtlTyping   = "typing"
 	CtlError    = "error"
 	CtlHello    = "hello"
+	CtlDraw     = "draw"
+	CtlCanvas   = "canvas"
+)
+
+const (
+	ScopeMine = "mine"
+	ScopeAll  = "all"
 )
 
 type Ctl struct {
@@ -59,6 +72,11 @@ type Ctl struct {
 	URL  string `json:"url,omitempty"`
 
 	Phase string `json:"phase,omitempty"`
+
+	Points []float64 `json:"points,omitempty"`
+	Seq    int       `json:"seq,omitempty"`
+	Color  int       `json:"color,omitempty"`
+	Scope  string    `json:"scope,omitempty"`
 }
 
 var clientTypes = map[string]bool{
@@ -72,6 +90,9 @@ var clientTypes = map[string]bool{
 	CtlBack:     true,
 	CtlForward:  true,
 	CtlReload:   true,
+	CtlStroke:   true,
+	CtlClear:    true,
+	CtlColor:    true,
 }
 
 func ParseCtl(data []byte) (Ctl, error) {
@@ -133,6 +154,32 @@ func (c Ctl) validate() error {
 		if len(c.Key) > 64 || len(c.Code) > 64 {
 			return fmt.Errorf("%w: key name too long", ErrCtlOutOfRange)
 		}
+	case CtlStroke:
+		if len(c.Points) == 0 {
+			return fmt.Errorf("%w: stroke without points", ErrCtlMalformed)
+		}
+		if len(c.Points)%2 != 0 {
+			return fmt.Errorf("%w: stroke has %d coordinates, want pairs", ErrCtlMalformed, len(c.Points))
+		}
+		if len(c.Points) > 2*MaxStrokePoints {
+			return fmt.Errorf("%w: stroke of %d points", ErrCtlOutOfRange, len(c.Points)/2)
+		}
+		for _, v := range c.Points {
+			if !inUnit(v) {
+				return fmt.Errorf("%w: stroke point %.3f must be normalised 0..1", ErrCtlOutOfRange, v)
+			}
+		}
+		if c.Seq < 0 || c.Seq >= MaxStrokeSeq {
+			return fmt.Errorf("%w: stroke seq %d", ErrCtlOutOfRange, c.Seq)
+		}
+	case CtlClear:
+		if c.Scope != ScopeMine && c.Scope != ScopeAll {
+			return fmt.Errorf("%w: clear scope %q", ErrCtlOutOfRange, c.Scope)
+		}
+	case CtlColor:
+		if c.Color < 0 || c.Color >= PaletteSize {
+			return fmt.Errorf("%w: colour %d", ErrCtlOutOfRange, c.Color)
+		}
 	}
 
 	return nil
@@ -151,6 +198,7 @@ type ServerMessage struct {
 	Cursors  any      `json:"cursors,omitempty"`
 	Nav      any      `json:"nav,omitempty"`
 	Presence any      `json:"presence,omitempty"`
+	Strokes  any      `json:"strokes,omitempty"`
 	UserID   string   `json:"userId,omitempty"`
 	Name     string   `json:"name,omitempty"`
 	Message  string   `json:"message,omitempty"`

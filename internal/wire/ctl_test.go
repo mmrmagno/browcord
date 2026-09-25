@@ -17,6 +17,12 @@ func TestParseCtlAccepts(t *testing.T) {
 		`{"type":"navigate","url":"https://example.com"}`,
 		`{"type":"back"}`,
 		`{"type":"reload"}`,
+		`{"type":"stroke","seq":1,"points":[0.1,0.2,0.3,0.4]}`,
+		`{"type":"stroke","seq":0,"points":[0,1]}`,
+		`{"type":"clear","scope":"mine"}`,
+		`{"type":"clear","scope":"all"}`,
+		`{"type":"color","color":0}`,
+		`{"type":"color","color":7}`,
 	}
 
 	for _, in := range cases {
@@ -45,6 +51,17 @@ func TestParseCtlRejects(t *testing.T) {
 		{"navigate without url", `{"type":"navigate"}`, ErrCtlMalformed},
 		{"oversized url", `{"type":"navigate","url":"https://e.com/` + strings.Repeat("a", MaxURLBytes) + `"}`, ErrCtlOutOfRange},
 		{"long key name", `{"type":"key","key":"` + strings.Repeat("k", 100) + `"}`, ErrCtlOutOfRange},
+		{"stroke without points", `{"type":"stroke","seq":1,"points":[]}`, ErrCtlMalformed},
+		{"stroke with odd coordinates", `{"type":"stroke","seq":1,"points":[0.1,0.2,0.3]}`, ErrCtlMalformed},
+		{"stroke point above range", `{"type":"stroke","seq":1,"points":[0.1,1.5]}`, ErrCtlOutOfRange},
+		{"stroke point negative", `{"type":"stroke","seq":1,"points":[0.1,-0.2]}`, ErrCtlOutOfRange},
+		{"stroke too long", `{"type":"stroke","seq":1,"points":[` +
+			strings.TrimSuffix(strings.Repeat("0.5,", 2*(MaxStrokePoints+1)), ",") + `]}`, ErrCtlOutOfRange},
+		{"stroke seq out of range", `{"type":"stroke","seq":1048576,"points":[0.1,0.2]}`, ErrCtlOutOfRange},
+		{"clear without scope", `{"type":"clear"}`, ErrCtlOutOfRange},
+		{"clear with unknown scope", `{"type":"clear","scope":"everything"}`, ErrCtlOutOfRange},
+		{"colour above palette", `{"type":"color","color":8}`, ErrCtlOutOfRange},
+		{"colour negative", `{"type":"color","color":-1}`, ErrCtlOutOfRange},
 	}
 
 	for _, tc := range cases {
