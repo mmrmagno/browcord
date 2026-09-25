@@ -134,9 +134,24 @@ Discord developer portal to the same host, and launch it from a voice channel.
 docker exec browcord-gateway wget -qO- http://127.0.0.1:8080/api/health
 ```
 
-`agents` should be 1, `secondsSinceChunk` 0 and `hasVideo` true. There is no
-browser console inside the Discord client, so the web client reports its
-diagnostics server side instead:
+`/api/health` is unauthenticated, because the container healthcheck uses it, so
+it reports only `ok`, `rooms` and `agents`. `agents` should be 1. Per room
+detail lives behind the agent token, since room ids are Discord activity
+instance ids and viewer counts are nobody else's business:
+
+```sh
+docker exec browcord-gateway sh -c 'wget -qO- \
+  --header="Authorization: Bearer $BROWCORD_AGENT_TOKEN" \
+  http://127.0.0.1:8080/api/stats'
+```
+
+The quoting matters: the token lives in the container's environment, not your
+shell, so expanding it inside `sh -c` keeps it out of your history and out of
+`ps` on the host.
+
+There `secondsSinceChunk` should be 0 and `hasVideo` true. There is no browser
+console inside the Discord client, so the web client reports its diagnostics
+server side instead:
 
 ```sh
 docker compose logs gateway | grep client

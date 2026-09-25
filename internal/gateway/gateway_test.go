@@ -398,3 +398,69 @@ func TestMediaSocketSurvivesItsOwnPings(t *testing.T) {
 		t.Fatal("no frame arrived after the ping cycles")
 	}
 }
+
+func getJSON(t *testing.T, srv *httptest.Server, path string, header http.Header) (int, map[string]any) {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+	if err != nil {
+		t.Fatalf("request %s: %v", path, err)
+	}
+	for k, v := range header {
+		req.Header[k] = v
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+
+	body := map[string]any{}
+	if resp.StatusCode == http.StatusOK {
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatalf("decode %s: %v", path, err)
+		}
+	}
+	return resp.StatusCode, body
+}
+
+func TestHealthDoesNotLeakRoomDetail(t *testing.T) {
+	_, srv := newTestGateway(t)
+	token, _ := mintSession(t, srv, "room-secret")
+	wsDial(t, wsURLOf(srv, "/ws/ctl", "room=room-secret&token="+token), nil)
+
+	code, body := getJSON(t, srv, "/api/health", nil)
+
+	if code != http.StatusOK {
+		t.Fatalf("health returned %d, want 200; the container healthcheck depends on it", code)
+	}
+	if _, present := body["stats"]; present {
+		t.Error("health exposes per room stats to unauthenticated callers")
+	}
+	if _, present := body["agents"]; !present {
+		t.Error("health must keep reporting agents; scripts/deploy.sh greps for it")
+	}
+}
+
+func TestStatsNeedsTheAgentToken(t *testing.T) {
+	_, srv := newTestGateway(t)
+
+	if code, _ := getJSON(t, srv, "/api/stats", nil); code != http.StatusUnauthorized {
+		t.Errorf("unauthenticated stats returned %d, want 401", code)
+	}
+
+	header := http.Header{}
+	header.Set("Authorization", "Bearer wrong-token")
+	if code, _ := getJSON(t, srv, "/api/stats", header); code != http.StatusUnauthorized {
+		t.Errorf("stats accepted a wrong bearer token, returned %d", code)
+	}
+
+	code, body := getJSON(t, srv, "/api/stats", agentHeader())
+	if code != http.StatusOK {
+		t.Fatalf("authenticated stats returned %d, want 200", code)
+	}
+	if _, present := body["stats"]; !present {
+		t.Error("authenticated stats omitted the per room detail")
+	}
+}

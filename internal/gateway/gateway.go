@@ -98,6 +98,7 @@ func New(cfg Config) (*Gateway, error) {
 func (g *Gateway) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", g.health)
+	mux.HandleFunc("/api/stats", g.stats)
 	mux.HandleFunc("/api/config", g.config)
 	mux.HandleFunc("/api/token", g.token)
 	mux.HandleFunc("/api/clientlog", g.clientLog)
@@ -176,6 +177,23 @@ func (g *Gateway) config(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) health(w http.ResponseWriter, r *http.Request) {
+	g.mu.RLock()
+	agents := len(g.agents)
+	g.mu.RUnlock()
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"rooms":  g.rooms.Count(),
+		"agents": agents,
+	})
+}
+
+func (g *Gateway) stats(w http.ResponseWriter, r *http.Request) {
+	if !bearerEquals(r.Header.Get("Authorization"), g.cfg.AgentToken) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	g.mu.RLock()
 	agents := len(g.agents)
 	g.mu.RUnlock()
