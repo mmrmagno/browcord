@@ -126,6 +126,7 @@ Fill in `.env`:
 | `ROOM_WIDTH`, `ROOM_HEIGHT` | Capture resolution, defaults to 1280x720 |
 | `ROOM_STALL_SECONDS` | How long an unchanged picture is allowed before the room checks Chromium is still painting, defaults to 30, 0 turns it off |
 | `BROWCORD_INK_TTL` | How long a drawing stays after its last point, defaults to 15s |
+| `BROWCORD_METRICS_ADDR` | Where the gateway serves Prometheus metrics, defaults to `:9464` in compose. Leave it off the public proxy |
 
 Generate the two secrets with something like `openssl rand -hex 32`.
 
@@ -280,6 +281,22 @@ Each room gets its own agent token, derived from `BROWCORD_SECRET`, so a room th
 is compromised by a hostile page can only publish to itself. Rooms are destroyed
 when they empty and at the lifetime ceiling, never reused, so one room's logins do
 not reach the next.
+
+### Monitoring
+
+The gateway serves Prometheus metrics on its own port, `9464` by default, separate from the
+public one. Expose it only on a network your Prometheus shares, and never route it through the
+reverse proxy. It carries counts only: rooms, viewers, sign ins by result, rooms started and
+removed, rooms refused at the cap, and watchdog actions. No Discord IDs.
+
+```yaml
+- job_name: browcord
+  static_configs:
+    - targets: ['browcord-gateway:9464']
+```
+
+Room restarts caused by a frozen picture happen inside the room, so they show up in cAdvisor
+as `container_start_time_seconds{container_label_browcord_managed="1"}` changing.
 
 ## Repository layout
 
