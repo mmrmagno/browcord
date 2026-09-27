@@ -120,9 +120,11 @@ func (g *Gateway) healRoom(rm *room.Room, now time.Time) {
 
 	switch action {
 	case healKick:
+		g.metrics.watchdogKicks.Add(1)
 		log.Printf("gateway: room %s unhealthy (%s), dropping its agent", rm.ID, reason)
 		g.closeAgent(rm.ID)
 	case healRestart:
+		g.metrics.watchdogRestarts.Add(1)
 		log.Printf("gateway: room %s still unhealthy (%s), asking its agent to restart", rm.ID, reason)
 		g.restartAgent(conn, reason)
 	}

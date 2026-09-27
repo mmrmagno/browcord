@@ -50,6 +50,7 @@ type Config struct {
 	FixedRoom    string
 	Supervisor   Supervisor
 	RoomCeiling  time.Duration
+	MetricsAddr  string
 }
 
 func (c *Config) applyDefaults() {
@@ -89,6 +90,8 @@ type Gateway struct {
 
 	healMu  sync.Mutex
 	healing map[string]*healState
+
+	metrics metrics
 }
 
 func New(cfg Config) (*Gateway, error) {
@@ -174,6 +177,9 @@ func (g *Gateway) Run(ctx context.Context) error {
 	go g.reapIdleRooms(ctx)
 	go g.watchRooms(ctx)
 	go g.fadeInk(ctx)
+	if g.cfg.MetricsAddr != "" {
+		go g.serveMetrics(ctx)
+	}
 
 	go func() {
 		<-ctx.Done()
@@ -202,6 +208,9 @@ func (g *Gateway) reapIdleRooms(ctx context.Context) {
 			g.endExpiredRooms(now)
 			for _, r := range g.rooms.IdleRooms(g.cfg.RoomIdle) {
 				log.Printf("gateway: reaping idle room %s", r.ID)
+				if g.isManaged(r.ID) {
+					g.metrics.roomsIdle.Add(1)
+				}
 				g.destroyRoom(r.ID)
 			}
 		}
@@ -279,6 +288,7 @@ func (g *Gateway) token(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !g.mint.Allow("token") {
+		g.metrics.signinLimited.Add(1)
 		http.Error(w, "too many sign ins, try again shortly", http.StatusTooManyRequests)
 		return
 	}
@@ -351,6 +361,7 @@ func (g *Gateway) token(w http.ResponseWriter, r *http.Request) {
 		}
 		if !permitted {
 			log.Printf("gateway: refused guild=%q user=%q", req.GuildID, identity.User.ID)
+			g.metrics.signinRefused.Add(1)
 			http.Error(w, "not permitted", http.StatusForbidden)
 			return
 		}
@@ -362,9 +373,11 @@ func (g *Gateway) token(w http.ResponseWriter, r *http.Request) {
 	if err := g.ensureRoom(r.Context(), roomID); err != nil {
 		log.Printf("gateway: could not start room %s for %q: %v", roomID, userID, err)
 		if errors.Is(err, supervisor.ErrFull) {
+			g.metrics.signinFull.Add(1)
 			http.Error(w, "every room is in use, try again later", http.StatusServiceUnavailable)
 			return
 		}
+		g.metrics.signinFailed.Add(1)
 		http.Error(w, "could not start the room", http.StatusBadGateway)
 		return
 	}
@@ -379,6 +392,7 @@ func (g *Gateway) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	g.metrics.signinOK.Add(1)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token":  session,
 		"userId": userID,
@@ -431,6 +445,10 @@ func (g *Gateway) acceptViewer(w http.ResponseWriter, r *http.Request) (*websock
 	sess, err := g.signer.VerifyForRoom(token, roomID)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return nil, authz.Session{}, false
+	}
+	if g.multiRoom() && !g.isManaged(sess.RoomID) {
+		http.Error(w, "room is not running, sign in again", http.StatusGone)
 		return nil, authz.Session{}, false
 	}
 
@@ -565,8 +583,6 @@ func (g *Gateway) viewerCtl(w http.ResponseWriter, r *http.Request) {
 		Name:   sess.Name,
 		InkTTL: g.cfg.InkTTL.Milliseconds(),
 	}.Encode())
-
-	go g.ensureForViewer(sess.RoomID)
 
 	if status := g.roomStatus(rm.ID); status != wire.StatusLive {
 		_ = conn.Write(ctx, websocket.MessageText, wire.ServerMessage{Type: wire.CtlStatus, State: status}.Encode())
@@ -745,6 +761,7 @@ func (g *Gateway) agent(w http.ResponseWriter, r *http.Request) {
 
 	rm := g.rooms.GetOrCreate(roomID)
 	rm.ResetStream()
+	g.metrics.agentConnects.Add(1)
 	log.Printf("gateway: agent connected for room %s", roomID)
 
 	ctx := r.Context()

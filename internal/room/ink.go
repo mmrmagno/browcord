@@ -2,6 +2,7 @@ package room
 
 import (
 	"math"
+	"math/rand/v2"
 	"time"
 )
 
@@ -194,11 +195,16 @@ func (r *Room) leastUsedColorLocked(palette int) int {
 		}
 	}
 
-	pick := 0
+	fewest := used[0]
+	for _, n := range used {
+		fewest = min(fewest, n)
+	}
+
+	candidates := make([]int, 0, palette)
 	for i, n := range used {
-		if n < used[pick] {
-			pick = i
+		if n == fewest {
+			candidates = append(candidates, i)
 		}
 	}
-	return pick
+	return candidates[rand.IntN(len(candidates))]
 }

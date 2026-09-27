@@ -49,9 +49,13 @@ func (g *Gateway) ensureRoom(ctx context.Context, roomID string) error {
 	defer cancel()
 
 	room, err := g.cfg.Supervisor.Ensure(ctx, roomID, g.agentTokenFor(roomID))
+	if errors.Is(err, supervisor.ErrFull) {
+		g.metrics.roomsFull.Add(1)
+	}
 	if err != nil {
 		return err
 	}
+	g.metrics.roomsStarted.Add(1)
 
 	created := time.Now()
 	if room.Created > 0 {
@@ -65,7 +69,7 @@ func (g *Gateway) ensureRoom(ctx context.Context, roomID string) error {
 	return nil
 }
 
-func (g *Gateway) ensureForViewer(roomID string) {
+func (g *Gateway) reviveRoom(roomID string) {
 	if !g.multiRoom() || g.isManaged(roomID) {
 		return
 	}
@@ -75,7 +79,7 @@ func (g *Gateway) ensureForViewer(roomID string) {
 		return
 	}
 
-	log.Printf("gateway: could not start room %s for a returning viewer: %v", roomID, err)
+	log.Printf("gateway: could not start room %s for its viewers: %v", roomID, err)
 	if errors.Is(err, supervisor.ErrFull) {
 		if rm, ok := g.rooms.Get(roomID); ok {
 			rm.BroadcastCtl(wire.ServerMessage{Type: wire.CtlStatus, State: wire.StatusFull}.Encode())
@@ -124,6 +128,7 @@ func (g *Gateway) endExpiredRooms(now time.Time) {
 			rm.BroadcastCtl(wire.ServerMessage{Type: wire.CtlStatus, State: wire.StatusEnding}.Encode())
 			rm.Evict()
 		}
+		g.metrics.roomsCeiling.Add(1)
 		g.destroyRoom(id)
 	}
 }
@@ -182,7 +187,8 @@ func (g *Gateway) syncManaged(ctx context.Context, now time.Time) {
 		log.Printf("gateway: room %s container is not running, starting it again", id)
 		g.closeAgent(id)
 		if rm, ok := g.rooms.Get(id); ok && rm.ViewerCount() > 0 {
-			go g.ensureForViewer(id)
+			g.metrics.roomsRevived.Add(1)
+			go g.reviveRoom(id)
 		}
 	}
 	for _, id := range vanished {

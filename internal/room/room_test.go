@@ -2,6 +2,7 @@ package room
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -511,4 +512,28 @@ func TestEvictClosesEveryViewerAndLeaveIsSafeAfterwards(t *testing.T) {
 	r.Leave("va")
 	r.BroadcastCtl([]byte(`{}`))
 	r.Publish(wire.Chunk{Type: wire.VideoKey, Payload: []byte{1}})
+}
+
+func TestJoinColourIsRandomButNeverShared(t *testing.T) {
+	seen := map[int]bool{}
+	for i := 0; i < 200; i++ {
+		r := New("room")
+		r.Join("v", "first", "First")
+		seen[r.Color("first")] = true
+	}
+	if len(seen) < wire.PaletteSize/2 {
+		t.Fatalf("the first joiner got only %d distinct colours across 200 rooms, want it spread over the palette", len(seen))
+	}
+
+	r := New("room")
+	used := map[int]string{}
+	for i := 0; i < wire.PaletteSize; i++ {
+		user := fmt.Sprintf("u%d", i)
+		r.Join("v"+user, user, user)
+		c := r.Color(user)
+		if other, taken := used[c]; taken {
+			t.Fatalf("%s got colour %d already held by %s while free colours remained", user, c, other)
+		}
+		used[c] = user
+	}
 }

@@ -297,3 +297,21 @@ func TestExitedRoomIsStartedAgainWhileWatched(t *testing.T) {
 
 	waitFor(t, "the room to be ensured again", func() bool { return g.isManaged("i-a") })
 }
+
+func TestStaleSessionCannotStartARoom(t *testing.T) {
+	g, srv, sup := newMultiGateway(t, 3)
+	token, _ := mintSession(t, srv, "i-a")
+
+	g.destroyRoom("i-a")
+	waitFor(t, "the container to be removed", func() bool { return sup.wasRemoved("i-a") })
+
+	for _, path := range []string{"/ws/ctl", "/ws/media"} {
+		if code := dialStatus(t, wsURLOf(srv, path, "room=i-a&token="+token), nil); code != http.StatusGone {
+			t.Errorf("%s with a session for a stopped room = %d, want 410 so the client signs in again", path, code)
+		}
+	}
+	time.Sleep(100 * time.Millisecond)
+	if n := sup.count(); n != 0 {
+		t.Fatalf("a reconnecting stale session started %d rooms", n)
+	}
+}

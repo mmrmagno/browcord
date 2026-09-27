@@ -35,6 +35,7 @@ func main() {
 		AllowUsers:   splitList(os.Getenv("BROWCORD_ALLOW_USERS")),
 		RoomIdle:     envDuration("BROWCORD_ROOM_IDLE", 60*time.Second),
 		InkTTL:       envDuration("BROWCORD_INK_TTL", 15*time.Second),
+		MetricsAddr:  os.Getenv("BROWCORD_METRICS_ADDR"),
 		SessionTTL:   envDuration("BROWCORD_SESSION_TTL", 8*time.Hour),
 		DevIdentity:  os.Getenv("BROWCORD_DEV_IDENTITY") == "1",
 		FixedRoom:    os.Getenv("BROWCORD_FIXED_ROOM"),

@@ -52,6 +52,7 @@ services:
       BROWCORD_GUARD_TOKEN: ${BROWCORD_GUARD_TOKEN:-}
       BROWCORD_MULTI_IDLE: ${BROWCORD_MULTI_IDLE:-60s}
       BROWCORD_ROOM_CEILING: ${BROWCORD_ROOM_CEILING:-6h}
+      BROWCORD_METRICS_ADDR: ${BROWCORD_METRICS_ADDR:-:9464}
     networks:
       proxy:
       guard:
@@ -59,6 +60,7 @@ services:
         ipv4_address: ${GATEWAY_IP:-10.89.0.2}
     expose:
       - "8080"
+      - "9464"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/health || exit 1"]
       interval: 30s

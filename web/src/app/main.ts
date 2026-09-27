@@ -277,6 +277,7 @@ async function main(): Promise<void> {
   const renewal = new Renewal(async () => {
     const fresh = await authenticate(clientId);
     identity.token = fresh.token;
+    identity.instanceId = fresh.instanceId;
     void reportClient(identity, "session-renewed", "reconnects kept failing, minted a new session");
     return true;
   }, SESSION_RENEW_COOLDOWN_MS);
