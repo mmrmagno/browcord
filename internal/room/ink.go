@@ -1,6 +1,9 @@
 package room
 
-import "math"
+import (
+	"math"
+	"time"
+)
 
 const (
 	maxInkPointsPerRoom   = 4000
@@ -14,6 +17,9 @@ type Stroke struct {
 	UserID string    `json:"userId"`
 	Color  int       `json:"color"`
 	Points []float64 `json:"points"`
+	Age    int64     `json:"age"`
+
+	lastAt time.Time
 }
 
 type pen struct {
@@ -60,6 +66,7 @@ func (r *Room) AppendInk(userID string, seq int, pts []float64) (Stroke, bool) {
 
 	stored := quantise(pts[:allowed*2])
 	held.stroke.Points = append(held.stroke.Points, stored...)
+	held.stroke.lastAt = time.Now()
 	r.inkPoints += allowed
 
 	return Stroke{ID: held.stroke.ID, UserID: userID, Color: held.stroke.Color, Points: stored}, true
@@ -103,6 +110,38 @@ func (r *Room) ClearAllInk() {
 	r.pens = make(map[string]pen)
 }
 
+func (r *Room) ExpireInk(now time.Time, ttl time.Duration) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	kept := r.strokes[:0]
+	points := 0
+	expired := false
+	for _, s := range r.strokes {
+		if now.Sub(s.lastAt) > ttl {
+			expired = true
+			continue
+		}
+		kept = append(kept, s)
+		points += len(s.Points) / 2
+	}
+	if !expired {
+		return false
+	}
+	for i := len(kept); i < len(r.strokes); i++ {
+		r.strokes[i] = nil
+	}
+
+	r.strokes = kept
+	r.inkPoints = points
+	for user, held := range r.pens {
+		if now.Sub(held.stroke.lastAt) > ttl {
+			delete(r.pens, user)
+		}
+	}
+	return true
+}
+
 func (r *Room) InkSnapshot() []Stroke {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -110,11 +149,18 @@ func (r *Room) InkSnapshot() []Stroke {
 }
 
 func (r *Room) inkSnapshotLocked() []Stroke {
+	now := time.Now()
 	out := make([]Stroke, 0, len(r.strokes))
 	for _, s := range r.strokes {
 		points := make([]float64, len(s.Points))
 		copy(points, s.Points)
-		out = append(out, Stroke{ID: s.ID, UserID: s.UserID, Color: s.Color, Points: points})
+		out = append(out, Stroke{
+			ID:     s.ID,
+			UserID: s.UserID,
+			Color:  s.Color,
+			Points: points,
+			Age:    now.Sub(s.lastAt).Milliseconds(),
+		})
 	}
 	return out
 }

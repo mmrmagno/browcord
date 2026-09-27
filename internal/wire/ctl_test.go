@@ -40,6 +40,7 @@ func TestParseCtlRejects(t *testing.T) {
 	}{
 		{"unknown type", `{"type":"exec"}`, ErrCtlUnknown},
 		{"server type from client", `{"type":"cursors"}`, ErrCtlUnknown},
+		{"agent verb from client", `{"type":"restart"}`, ErrCtlUnknown},
 		{"empty type", `{"type":""}`, ErrCtlUnknown},
 		{"unknown field", `{"type":"back","evil":1}`, ErrCtlMalformed},
 		{"not json", `nope`, ErrCtlMalformed},
@@ -114,4 +115,23 @@ func FuzzParseCtl(f *testing.F) {
 			t.Fatalf("accepted pointer outside the unit square: %f,%f", c.X, c.Y)
 		}
 	})
+}
+
+func TestAgentCmdRoundTrip(t *testing.T) {
+	in := AgentCmd{Type: AgentRestart, Reason: "stale"}
+	out, err := ParseAgentCmd(in.Encode())
+	if err != nil {
+		t.Fatalf("ParseAgentCmd: %v", err)
+	}
+	if out != in {
+		t.Errorf("round trip = %+v, want %+v", out, in)
+	}
+}
+
+func TestParseAgentCmdRejectsClientVerbs(t *testing.T) {
+	for _, in := range []string{`{"type":"click"}`, `{"type":"navigate","url":"https://e.com"}`, `{"type":""}`, `nope`} {
+		if _, err := ParseAgentCmd([]byte(in)); err == nil {
+			t.Errorf("ParseAgentCmd(%s) accepted a non agent command", in)
+		}
+	}
 }

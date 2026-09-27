@@ -1,6 +1,8 @@
+import { EchoEvent, EchoTracker } from "./echo";
 import { RevealGate } from "./gate";
+import { parseRoomState, RoomState, statusNote } from "./status";
 import { InputBridge } from "./input";
-import { FLUSH_MS, InkStore, Stroke, StrokeBatcher } from "./ink";
+import { FLUSH_MS, INK_TTL_MS, InkStore, Stroke, StrokeBatcher } from "./ink";
 import { PALETTE, colorAt } from "./palette";
 import { Activity, PresenceReporter } from "./presence";
 import { Renewal } from "./renewal";
@@ -35,6 +37,7 @@ const el = {
   surface: document.getElementById("surface") as HTMLDivElement,
   canvas: document.getElementById("screen") as HTMLCanvasElement,
   cursors: document.getElementById("cursors") as HTMLDivElement,
+  echo: document.getElementById("echo") as HTMLDivElement,
   url: document.getElementById("url") as HTMLInputElement,
   back: document.getElementById("back") as HTMLButtonElement,
   forward: document.getElementById("forward") as HTMLButtonElement,
@@ -150,7 +153,10 @@ function renderPresence(people: Participant[], selfId: string): void {
   );
 }
 
+let inkTtl = INK_TTL_MS;
+
 function renderInk(store: InkStore): void {
+  const now = performance.now();
   const ctx = el.ink.getContext("2d");
   if (!ctx) return;
 
@@ -162,6 +168,7 @@ function renderInk(store: InkStore): void {
   for (const stroke of store.all()) {
     if (stroke.points.length < 2) continue;
 
+    ctx.globalAlpha = store.alpha(stroke.id, now, inkTtl);
     ctx.strokeStyle = colorAt(stroke.color);
     ctx.beginPath();
     ctx.moveTo(stroke.points[0] * el.ink.width, stroke.points[1] * el.ink.height);
@@ -173,6 +180,7 @@ function renderInk(store: InkStore): void {
     }
     ctx.stroke();
   }
+  ctx.globalAlpha = 1;
 }
 
 function renderCursors(cursors: Cursor[], selfId: string): void {
@@ -196,6 +204,43 @@ function renderCursors(cursors: Cursor[], selfId: string): void {
         return node;
       }),
   );
+}
+
+const echo = new EchoTracker();
+const echoNodes = new Map<number, HTMLDivElement>();
+let echoTimer = 0;
+
+function sweepEcho(): void {
+  for (const ring of echo.expire(performance.now())) {
+    echoNodes.get(ring.id)?.remove();
+    echoNodes.delete(ring.id);
+  }
+  clearTimeout(echoTimer);
+  const next = echo.nextExpiry();
+  echoTimer = next === null ? 0 : window.setTimeout(sweepEcho, Math.max(0, next - performance.now()));
+}
+
+function showEcho(event: EchoEvent, color: number): void {
+  const box = contentBox(
+    el.surface.clientWidth,
+    el.surface.clientHeight,
+    el.canvas.width,
+    el.canvas.height,
+  );
+
+  for (const ring of echo.apply(event, box, performance.now())) {
+    let node = echoNodes.get(ring.id);
+    if (!node) {
+      node = document.createElement("div");
+      node.style.left = `${ring.left}px`;
+      node.style.top = `${ring.top}px`;
+      node.style.setProperty("--cursor", colorAt(color));
+      echoNodes.set(ring.id, node);
+      el.echo.append(node);
+    }
+    node.className = `ring ring-${ring.state}`;
+  }
+  sweepEcho();
 }
 
 const SESSION_RENEW_COOLDOWN_MS = 30000;
@@ -269,6 +314,11 @@ async function main(): Promise<void> {
   let ctlWasOnline = true;
 
   const ink = new InkStore();
+  window.setInterval(() => {
+    const now = performance.now();
+    const expired = ink.expire(now, inkTtl);
+    if (expired || ink.fading(now, inkTtl)) renderInk(ink);
+  }, 100);
   const batcher = new StrokeBatcher();
   let strokeSeq = Math.floor(Math.random() * 1e6);
   let myColor = 0;
@@ -281,10 +331,16 @@ async function main(): Promise<void> {
     }
   }
 
+  let roomState: RoomState = "live";
+
   const ctl = new ControlSocket(
     identity,
     (msg) => {
       switch (msg.type) {
+        case "hello":
+          if (typeof msg.inkTtl === "number" && msg.inkTtl > 0) inkTtl = msg.inkTtl;
+          break;
+
         case "cursors":
           renderCursors((msg.cursors as Cursor[]) ?? [], identity.userId);
           break;
@@ -300,12 +356,12 @@ async function main(): Promise<void> {
         }
 
         case "canvas":
-          ink.reset((msg.strokes as Stroke[]) ?? []);
+          ink.reset((msg.strokes as Stroke[]) ?? [], performance.now());
           renderInk(ink);
           break;
 
         case "draw":
-          ink.apply((msg.strokes as Stroke[]) ?? []);
+          ink.apply((msg.strokes as Stroke[]) ?? [], performance.now());
           renderInk(ink);
           break;
 
@@ -332,6 +388,18 @@ async function main(): Promise<void> {
           note(String(msg.message ?? "Something went wrong"), "warn");
           setLoading(false);
           break;
+
+        case "status": {
+          const next = parseRoomState(msg.state);
+          if (!next) break;
+          const shown = statusNote(roomState, next);
+          roomState = next;
+          if (!shown) break;
+          note(shown.message, shown.tone, shown.holdMs);
+          if (shown.resync) player.resync();
+          void reportClient(identity, "room-status", next, player.codec, player.decoded);
+          break;
+        }
       }
     },
     (online) => {
@@ -381,6 +449,7 @@ async function main(): Promise<void> {
       sendBatch(batcher.flush(now));
       batcher.end();
     },
+    (event) => showEcho(event, myColor),
   );
 
   window.setInterval(() => sendBatch(batcher.flush(performance.now())), FLUSH_MS);
@@ -528,7 +597,7 @@ async function main(): Promise<void> {
       window.setTimeout(() => {
         const detail =
           `state=${player.audioState} played=${player.audioPlayed} dropped=${player.audioDropped} ` +
-          `skew=${Math.round(player.syncSkewMs)}ms resyncs=${player.audioResyncs} underruns=${player.audioUnderruns} ` +
+          `skew=${Math.round(player.syncSkewMs)}ms resyncs=${player.audioResyncs} timeline=${player.resyncs} underruns=${player.audioUnderruns} ` +
           `audioOffset=${Math.round(player.audioOffsetMs)}ms videoOffset=${Math.round(player.videoOffsetMs)}ms ` +
           `netJitter=${Math.round(player.videoJitterMs)}ms srcJitter=${Math.round(player.sourceJitterMs)}ms ` +
           `audioJitter=${Math.round(player.audioJitterMs)}ms audioBuffer=${Math.round(player.audioBufferMs)}ms ` +

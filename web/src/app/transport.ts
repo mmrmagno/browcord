@@ -108,7 +108,7 @@ export async function authenticate(clientId: string): Promise<Identity> {
         response_type: "code",
         state: "",
         prompt: "none",
-        scope: ["identify", "rpc.activities.write"],
+        scope: ["identify", "guilds.members.read", "rpc.activities.write"],
       });
       code = granted.code;
       activitySdk = sdk as unknown as ActivitySdk;
@@ -118,7 +118,7 @@ export async function authenticate(clientId: string): Promise<Identity> {
         response_type: "code",
         state: "",
         prompt: "none",
-        scope: ["identify"],
+        scope: ["identify", "guilds.members.read"],
       });
       code = granted.code;
     }
@@ -133,6 +133,9 @@ export async function authenticate(clientId: string): Promise<Identity> {
     body: JSON.stringify({ code, instanceId, guildId }),
   });
 
+  if (res.status === 503) {
+    throw new Error("Every room is in use right now. Try again in a little while.");
+  }
   if (!res.ok) {
     throw new Error(`authentication failed: ${res.status} ${await res.text()}`);
   }

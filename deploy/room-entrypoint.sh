@@ -34,7 +34,7 @@ env -u PULSE_SERVER pulseaudio \
 
 pactl set-default-sink browcord
 
-chromium \
+env -u BROWCORD_AGENT_TOKEN -u BROWCORD_GATEWAY_URL chromium \
   --user-data-dir=/profile \
   --window-position=0,0 \
   --window-size="${WIDTH},${HEIGHT}" \
@@ -49,7 +49,6 @@ chromium \
   --autoplay-policy=no-user-gesture-required \
   --remote-debugging-address=127.0.0.1 \
   --remote-debugging-port=9222 \
-  --remote-allow-origins=http://127.0.0.1:9222 \
   "${START_URL}" &
 
 sleep 3

@@ -44,6 +44,7 @@ RUN mkdir -p /opt/ubolite \
 
 COPY deploy/install-ublock.sh /usr/local/bin/install-ublock
 RUN chmod +x /usr/local/bin/install-ublock && /usr/local/bin/install-ublock
+COPY deploy/chromium/browcord-policy.json /etc/chromium/policies/managed/browcord.json
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin browcord \
     && mkdir -p /tmp/pulse /tmp/runtime /profile \

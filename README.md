@@ -124,8 +124,28 @@ Fill in `.env`:
 | `BROWCORD_SESSION_TTL` | How long a viewer session lasts, defaults to 8h |
 | `ROOM_START_URL` | Page the room opens on |
 | `ROOM_WIDTH`, `ROOM_HEIGHT` | Capture resolution, defaults to 1280x720 |
+| `ROOM_STALL_SECONDS` | How long an unchanged picture is allowed before the room checks Chromium is still painting, defaults to 30, 0 turns it off |
+| `BROWCORD_INK_TTL` | How long a drawing stays after its last point, defaults to 15s |
 
 Generate the two secrets with something like `openssl rand -hex 32`.
+
+### One room or one per activity
+
+By default every Discord activity instance shares one long lived room. To give
+each instance its own fresh browser, add this to `.env`:
+
+| Variable | What it is |
+|---|---|
+| `COMPOSE_PROFILES=multi` | Starts the room guard and the socket proxy instead of the fixed room |
+| `BROWCORD_GUARD_URL` | `http://browcord-dockerguard:7070` |
+| `BROWCORD_GUARD_TOKEN` | Shared secret between the gateway and the guard, `openssl rand -hex 32` |
+| `ROOM_CAP` | Most rooms at once, defaults to 2. Each room can use 2.5 CPUs and 4 GB |
+| `BROWCORD_MULTI_IDLE` | How long an empty room lives, defaults to 60s |
+| `BROWCORD_ROOM_CEILING` | Hard limit on a room's life, defaults to 6h |
+| `ROOM_GUARD_CEILING` | The guard's own backstop, removes any room older than this, defaults to 6h10m |
+
+In this mode `BROWCORD_SECRET` must be at least 32 bytes, because each room's
+agent token is derived from it.
 
 Then bring it up. This builds both images locally and starts the gateway, the
 room and the egress filter:
@@ -198,6 +218,27 @@ Re-run the script after any change to the compose file or the networks, then
 check from inside a live room that the metadata endpoint, the LAN gateway and the
 host's own ports are all unreachable.
 
+### The browser's own debug port
+
+The agent drives Chromium through its debugging port on `127.0.0.1:9222`, and that
+port is full control of the browser. Everyone in a room can click links, so the
+browser must never be able to reach it. Three things keep it that way:
+
+- Chromium refuses debugger connections that carry a browser `Origin`, so a web
+  page, even one served from the debug port itself, cannot open the socket. The
+  agent connects without an `Origin` and is unaffected.
+- A managed policy (`deploy/chromium/browcord-policy.json`) blocks navigation to
+  loopback addresses and to `file://`, `chrome://`, `devtools://` and `view-source:`,
+  and turns off printing, file pickers, downloads, the password manager and
+  autofill. A native dialog cannot be clicked through the stream, so it would
+  otherwise freeze the room.
+- The agent token is removed from Chromium's environment, so a compromised
+  renderer cannot read it out of `/proc`.
+
+Do not add `--remote-allow-origins`, and do not set `DeveloperToolsAvailability`:
+the first reopens the port to pages, and the second switches the port off entirely,
+which silently kills all input.
+
 ### The seccomp profile
 
 `deploy/seccomp/chromium.json` is what lets Chromium keep its own sandbox while
@@ -220,11 +261,32 @@ host syscall surface slightly, in exchange for keeping the much stronger boundar
 that is Chromium's own multi process sandbox. On a host with gVisor, running
 rooms under `runsc` removes the need for the trade entirely.
 
+### Multi room and the Docker socket
+
+Starting containers needs the Docker socket, and the socket is root on the host.
+So the gateway never gets it. It talks to `browcord-dockerguard`, which understands
+three requests: start room X, remove room X, and list rooms. The guard builds the
+whole container definition itself, from its own configuration. The gateway sends a
+room ID and a token, and both are checked against a strict pattern. A compromised
+gateway can start at most `ROOM_CAP` hardened rooms and remove them, and nothing
+else: no mounts, no privileged containers, no other images, no exec.
+
+Only the guard holds a path to the socket, through `tecnativa/docker-socket-proxy`.
+That proxy filters by URL prefix and would allow any container definition, so it is a
+second fence and not the boundary. The guard and the proxy sit on internal networks
+with no route to the internet, and no room can reach either of them.
+
+Each room gets its own agent token, derived from `BROWCORD_SECRET`, so a room that
+is compromised by a hostile page can only publish to itself. Rooms are destroyed
+when they empty and at the lifetime ceiling, never reused, so one room's logins do
+not reach the next.
+
 ## Repository layout
 
 ```
 cmd/browcord-gateway   the public service: auth, rooms, websocket fan out
 cmd/browcord-agent     runs inside a room container: Chromium, capture, input
+cmd/browcord-dockerguard  starts and removes room containers, the only path to docker
 cmd/capturedump        runs the capture pipeline to a file, for verification
 
 internal/wire      chunk codec (type, PTS, length) and control message schema
@@ -236,6 +298,9 @@ internal/agent     in container supervisor, ties capture to the gateway
 internal/authz     signed sessions, guild allow list, per user rate limits
 internal/discord   OAuth code exchange and identity
 internal/h264      Annex B parsing, kept for the alternate encoder path
+internal/roomspec  room ID rules, per room agent tokens, container names
+internal/dockerguard  the room template and the guard's small API
+internal/supervisor   the gateway's client for the guard
 
 web/src/app        the client: transport, player, input, main
 deploy/            container images, compose stack, seccomp, firewall rules
@@ -283,17 +348,24 @@ decoder if it dies mid stream, and an expired session is renewed rather than
 retried forever. The room container is supervised, so a dead browser stops the
 container and restarts it rather than streaming a frozen picture forever.
 
-Not done yet:
+The gateway admits a Discord user if their ID is in `BROWCORD_ALLOW_USERS`, or if
+Discord confirms they are a member of the guild the Activity was launched in and that
+guild is in `BROWCORD_ALLOW_GUILDS`. The client asks for the `identify` and
+`guilds.members.read` scopes for this; the guild ID the client reports is never
+trusted on its own.
 
-- Multi room. Every Discord activity instance currently maps onto one long lived
-  room container. Real per instance rooms need a supervisor that creates and
-  destroys containers through a docker socket proxy.
-- Gateway self healing. The gateway can already see that a room has no agent and
-  stale chunks. It should act on that rather than serving a frozen picture.
-- Frozen room detection. If Chromium stops painting while the encoder keeps
-  running, every health signal still reads green. Catching that needs a check at
-  the capture source, not at the gateway.
-- Local input echo. Every click round trips to the server before anything moves.
+Also built, with its tests passing and a run against a local Docker host, but not yet
+in production:
+
+- Multi room, one fresh container per activity instance, through the guard above.
+- Self healing. The gateway notices a room whose stream went stale, drops its
+  agent, then asks it to restart, and tells viewers what is happening.
+- Frozen room detection. The agent watches a tiny downscaled copy of the capture.
+  If the picture stops changing, it asks Chromium whether it is still painting and
+  restarts the room if not. A static page is left alone.
+- Local input echo. A click shows a ring at once instead of waiting for the round
+  trip.
+- Drawings fade away 15 seconds after each stroke was last drawn on, `BROWCORD_INK_TTL`.
 
 ## License
 

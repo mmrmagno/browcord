@@ -134,3 +134,32 @@ test("clearing one author leaves everyone else's ink in paint order", () => {
     [2, 4],
   );
 });
+
+test("ink stays solid, then fades, then expires", () => {
+  const s = new InkStore();
+  s.apply([{ id: 1, userId: "a", color: 0, points: [0, 0] }], 1000);
+
+  assert.equal(s.alpha(1, 1000, 15000, 3000), 1);
+  assert.equal(s.fading(12000, 15000, 3000), false);
+  assert.equal(s.alpha(1, 14500, 15000, 3000), 0.5);
+  assert.equal(s.fading(14500, 15000, 3000), true);
+
+  assert.equal(s.expire(15999, 15000), false);
+  assert.equal(s.expire(16001, 15000), true);
+  assert.equal(s.all().length, 0);
+});
+
+test("drawing more keeps a stroke alive", () => {
+  const s = new InkStore();
+  s.apply([{ id: 1, userId: "a", color: 0, points: [0, 0] }], 0);
+  s.apply([{ id: 1, userId: "a", color: 0, points: [0.1, 0.1] }], 10000);
+  assert.equal(s.expire(20000, 15000), false);
+  assert.equal(s.all().length, 1);
+});
+
+test("a snapshot honours the age the server reports", () => {
+  const s = new InkStore();
+  s.reset([{ id: 1, userId: "a", color: 0, points: [0, 0], age: 14000 }], 50000);
+  assert.equal(s.alpha(1, 50000, 15000, 3000) < 1, true);
+  assert.equal(s.expire(51001, 15000), true);
+});

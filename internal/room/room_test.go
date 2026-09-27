@@ -439,3 +439,76 @@ func TestLeaveKeepsInkAndHoldsColourWhileAnotherSocketRemains(t *testing.T) {
 		t.Errorf("leaving discarded ink, %d strokes left, want 1", got)
 	}
 }
+
+func TestInkExpiresAfterItsLastPoint(t *testing.T) {
+	r := New("room")
+	r.AppendInk("old", 1, []float64{0.1, 0.1})
+	time.Sleep(20 * time.Millisecond)
+	r.AppendInk("new", 1, []float64{0.2, 0.2})
+
+	if r.ExpireInk(time.Now(), time.Hour) {
+		t.Fatal("fresh ink was expired")
+	}
+	if !r.ExpireInk(time.Now(), 10*time.Millisecond) {
+		t.Fatal("old ink survived its ttl")
+	}
+
+	left := r.InkSnapshot()
+	if len(left) != 1 || left[0].UserID != "new" {
+		t.Fatalf("after expiry the canvas holds %+v, want only the new stroke", left)
+	}
+
+	if _, ok := r.AppendInk("old", 1, []float64{0.3, 0.3}); !ok {
+		t.Fatal("a user whose stroke expired could not draw again")
+	}
+	if n := len(r.InkSnapshot()); n != 2 {
+		t.Fatalf("drawing again with the same seq after expiry gave %d strokes, want a fresh one", n)
+	}
+}
+
+func TestInkExpiryFreesTheRoomCap(t *testing.T) {
+	r := New("room")
+	for seq := 1; seq <= maxInkStrokesPerUser; seq++ {
+		r.AppendInk("u", seq, []float64{0.5, 0.5})
+	}
+	if _, ok := r.AppendInk("u", maxInkStrokesPerUser+1, []float64{0.5, 0.5}); ok {
+		t.Fatal("precondition: the per user cap should refuse")
+	}
+
+	r.ExpireInk(time.Now().Add(time.Minute), time.Second)
+	if _, ok := r.AppendInk("u", maxInkStrokesPerUser+2, []float64{0.5, 0.5}); !ok {
+		t.Fatal("expired strokes still count against the cap")
+	}
+}
+
+func TestInkSnapshotReportsAge(t *testing.T) {
+	r := New("room")
+	r.AppendInk("u", 1, []float64{0.5, 0.5})
+	time.Sleep(30 * time.Millisecond)
+	if age := r.InkSnapshot()[0].Age; age < 25 {
+		t.Fatalf("snapshot age = %d ms, want at least 25", age)
+	}
+}
+
+func TestEvictClosesEveryViewerAndLeaveIsSafeAfterwards(t *testing.T) {
+	r := New("room")
+	a := r.Join("va", "ua", "A")
+	b := r.Join("vb", "ub", "B")
+
+	r.Evict()
+
+	for _, v := range []*Viewer{a, b} {
+		for range v.Ctl {
+		}
+		if _, open := <-v.Media; open {
+			t.Fatal("a viewer's media channel stayed open after eviction")
+		}
+	}
+	if r.ViewerCount() != 0 {
+		t.Fatalf("%d viewers left after eviction", r.ViewerCount())
+	}
+
+	r.Leave("va")
+	r.BroadcastCtl([]byte(`{}`))
+	r.Publish(wire.Chunk{Type: wire.VideoKey, Payload: []byte{1}})
+}

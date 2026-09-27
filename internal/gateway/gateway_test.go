@@ -572,3 +572,373 @@ func TestColourIsBroadcastAndNeverReachesTheAgent(t *testing.T) {
 
 	t.Fatalf("presence colours seen were %v, want the chosen colour 5 to reach other viewers", seen)
 }
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+func agentAttached(g *Gateway, roomID string) bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.agents[roomID] != nil
+}
+
+func sendChunk(t *testing.T, ctx context.Context, agent *websocket.Conn, c wire.Chunk) {
+	t.Helper()
+
+	encoded, err := c.Append(nil)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if err := agent.Write(ctx, websocket.MessageBinary, encoded); err != nil {
+		t.Fatalf("agent write: %v", err)
+	}
+}
+
+func readStatus(t *testing.T, ctx context.Context, viewer *websocket.Conn) string {
+	t.Helper()
+
+	var msg struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(readUntil(t, ctx, viewer, wire.CtlStatus), &msg); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	return msg.State
+}
+
+func TestWatchdogKicksThenRestartsAStaleAgent(t *testing.T) {
+	g, srv := newTestGateway(t)
+	token, _ := mintSession(t, srv, "room-stale")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	viewer := wsDial(t, wsURLOf(srv, "/ws/ctl", "room=room-stale&token="+token), nil)
+	readUntil(t, ctx, viewer, wire.CtlHello)
+
+	first := wsDial(t, wsURLOf(srv, "/agent", "room=room-stale"), agentHeader())
+	waitFor(t, "the agent to attach", func() bool { return agentAttached(g, "room-stale") })
+	sendChunk(t, ctx, first, wire.Chunk{Type: wire.VideoConfig, Payload: []byte("vp8")})
+	waitFor(t, "the video config", func() bool {
+		rm, _ := g.rooms.Get("room-stale")
+		return rm.HasVideo()
+	})
+
+	start := time.Now()
+	g.heal(start.Add(stallAfter / 2))
+	if !agentAttached(g, "room-stale") {
+		t.Fatal("the agent was kicked before the stall window elapsed")
+	}
+
+	g.heal(start.Add(stallAfter + time.Second))
+	if agentAttached(g, "room-stale") {
+		t.Fatal("a stale agent was not dropped")
+	}
+	if got := readStatus(t, ctx, viewer); got != wire.StatusRecovering {
+		t.Errorf("status after kick = %q, want %q", got, wire.StatusRecovering)
+	}
+
+	second := wsDial(t, wsURLOf(srv, "/agent", "room=room-stale"), agentHeader())
+	waitFor(t, "the agent to reattach", func() bool { return agentAttached(g, "room-stale") })
+
+	g.heal(time.Now().Add(stallAfter + time.Second))
+
+	_, data, err := second.Read(ctx)
+	if err != nil {
+		t.Fatalf("the reconnected agent never heard from the gateway: %v", err)
+	}
+	cmd, err := wire.ParseAgentCmd(data)
+	if err != nil || cmd.Type != wire.AgentRestart {
+		t.Fatalf("second escalation sent %q, want a restart command", data)
+	}
+}
+
+func TestWatchdogGivesANewRoomItsGrace(t *testing.T) {
+	g, srv := newTestGateway(t)
+	token, _ := mintSession(t, srv, "room-new")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	viewer := wsDial(t, wsURLOf(srv, "/ws/ctl", "room=room-new&token="+token), nil)
+	readUntil(t, ctx, viewer, wire.CtlHello)
+	wsDial(t, wsURLOf(srv, "/agent", "room=room-new"), agentHeader())
+	waitFor(t, "the agent to attach", func() bool { return agentAttached(g, "room-new") })
+
+	rm, _ := g.rooms.Get("room-new")
+	if rm.Stats().SecondsIdle != -1 {
+		t.Fatal("precondition: a brand new room should report -1 seconds since its last chunk")
+	}
+
+	g.heal(time.Now().Add(stallAfter / 2))
+	if !agentAttached(g, "room-new") {
+		t.Fatal("a room that has never produced a chunk was treated as infinitely stale")
+	}
+}
+
+func TestWatchdogIgnoresRoomsWithoutViewers(t *testing.T) {
+	g, srv := newTestGateway(t)
+
+	wsDial(t, wsURLOf(srv, "/agent", "room=room-empty"), agentHeader())
+	waitFor(t, "the agent to attach", func() bool { return agentAttached(g, "room-empty") })
+
+	g.heal(time.Now().Add(time.Hour))
+	if !agentAttached(g, "room-empty") {
+		t.Fatal("the watchdog acted on a room nobody is watching")
+	}
+}
+
+func TestWatchdogReportsOfflineAndLive(t *testing.T) {
+	g, srv := newTestGateway(t)
+	token, _ := mintSession(t, srv, "room-off")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	viewer := wsDial(t, wsURLOf(srv, "/ws/ctl", "room=room-off&token="+token), nil)
+	readUntil(t, ctx, viewer, wire.CtlHello)
+
+	g.heal(time.Now())
+	if got := readStatus(t, ctx, viewer); got != wire.StatusOffline {
+		t.Fatalf("status with no agent = %q, want %q", got, wire.StatusOffline)
+	}
+
+	late := wsDial(t, wsURLOf(srv, "/ws/ctl", "room=room-off&token="+token), nil)
+	if got := readStatus(t, ctx, late); got != wire.StatusOffline {
+		t.Errorf("a late joiner saw %q, want %q", got, wire.StatusOffline)
+	}
+
+	agent := wsDial(t, wsURLOf(srv, "/agent", "room=room-off"), agentHeader())
+	waitFor(t, "the agent to attach", func() bool { return agentAttached(g, "room-off") })
+	sendChunk(t, ctx, agent, wire.Chunk{Type: wire.VideoConfig, Payload: []byte("vp8")})
+	waitFor(t, "the video config", func() bool {
+		rm, _ := g.rooms.Get("room-off")
+		return rm.HasVideo()
+	})
+
+	g.heal(time.Now())
+	if got := readStatus(t, ctx, viewer); got != wire.StatusLive {
+		t.Errorf("status after the agent returned = %q, want %q", got, wire.StatusLive)
+	}
+}
+
+func TestViewerCannotSendRestart(t *testing.T) {
+	g, srv := newTestGateway(t)
+	token, _ := mintSession(t, srv, "room-evil")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	agent := wsDial(t, wsURLOf(srv, "/agent", "room=room-evil"), agentHeader())
+	waitFor(t, "the agent to attach", func() bool { return agentAttached(g, "room-evil") })
+	viewer := wsDial(t, wsURLOf(srv, "/ws/ctl", "room=room-evil&token="+token), nil)
+
+	if err := viewer.Write(ctx, websocket.MessageText, []byte(`{"type":"restart","reason":"x"}`)); err != nil {
+		t.Fatalf("viewer write: %v", err)
+	}
+	readUntil(t, ctx, viewer, wire.CtlError)
+	assertAgentSilent(t, agent)
+}
+
+func TestAgentSocketIsPinged(t *testing.T) {
+	oldInterval, oldTimeout := agentPingInterval, agentPingTimeout
+	t.Cleanup(func() {
+		agentPingInterval, agentPingTimeout = oldInterval, oldTimeout
+	})
+	agentPingInterval = 20 * time.Millisecond
+	agentPingTimeout = 50 * time.Millisecond
+
+	g, srv := newTestGateway(t)
+	wsDial(t, wsURLOf(srv, "/agent", "room=room-deaf"), agentHeader())
+	waitFor(t, "the agent to attach", func() bool { return agentAttached(g, "room-deaf") })
+
+	waitFor(t, "a deaf agent to be dropped", func() bool { return !agentAttached(g, "room-deaf") })
+}
+
+func TestExpiredInkIsClearedForEveryone(t *testing.T) {
+	g, srv := newTestGateway(t)
+	token, _ := mintSession(t, srv, "room-fade")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	viewer := wsDial(t, wsURLOf(srv, "/ws/ctl", "room=room-fade&token="+token), nil)
+	hello := readUntil(t, ctx, viewer, wire.CtlHello)
+	var greeting struct {
+		InkTTL int64 `json:"inkTtl"`
+	}
+	if err := json.Unmarshal(hello, &greeting); err != nil || greeting.InkTTL != g.cfg.InkTTL.Milliseconds() {
+		t.Fatalf("hello carried inkTtl %d, want %d", greeting.InkTTL, g.cfg.InkTTL.Milliseconds())
+	}
+
+	if err := viewer.Write(ctx, websocket.MessageText, []byte(`{"type":"stroke","seq":1,"points":[0.1,0.1,0.2,0.2]}`)); err != nil {
+		t.Fatalf("stroke: %v", err)
+	}
+	readUntil(t, ctx, viewer, wire.CtlDraw)
+
+	g.expireInk(time.Now().Add(g.cfg.InkTTL + time.Second))
+
+	var canvas struct {
+		Strokes []json.RawMessage `json:"strokes"`
+	}
+	if err := json.Unmarshal(readUntil(t, ctx, viewer, wire.CtlCanvas), &canvas); err != nil {
+		t.Fatalf("decode canvas: %v", err)
+	}
+	if len(canvas.Strokes) != 0 {
+		t.Fatalf("expired ink is still on the canvas: %d strokes", len(canvas.Strokes))
+	}
+}
+
+func TestGuildAllowListRequiresRealMembership(t *testing.T) {
+	discordAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/oauth2/token":
+			_, _ = w.Write([]byte(`{"access_token":"tok-` + r.FormValue("code") + `","token_type":"Bearer"}`))
+		case r.URL.Path == "/oauth2/@me":
+			user := strings.TrimSuffix(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer tok-"), "0000000000000000")
+			_, _ = w.Write([]byte(`{"user":{"id":"` + user + `","username":"` + user + `"}}`))
+		case r.URL.Path == "/users/@me/guilds/1000/member" && r.Header.Get("Authorization") == "Bearer tok-member0000000000000000":
+			_, _ = w.Write([]byte(`{}`))
+		case strings.HasSuffix(r.URL.Path, "/member"):
+			http.Error(w, `{"message":"Unknown Guild"}`, http.StatusNotFound)
+		default:
+			http.Error(w, "unexpected", http.StatusTeapot)
+		}
+	}))
+	defer discordAPI.Close()
+
+	g, err := New(Config{
+		StaticDir:   t.TempDir(),
+		ClientID:    "test-client",
+		AgentToken:  testAgentToken,
+		Secret:      authz.GenerateSecret(),
+		AllowGuilds: []string{"1000"},
+		AllowUsers:  []string{"friend"},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	g.discord.API = discordAPI.URL
+	srv := httptest.NewServer(g.Handler())
+	defer srv.Close()
+
+	mint := func(code, guild string) int {
+		body := `{"code":"` + code + `0000000000000000","instanceId":"i-1","guildId":"` + guild + `"}`
+		resp, err := http.Post(srv.URL+"/api/token", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("token: %v", err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if code := mint("stranger", "1000"); code != http.StatusForbidden {
+		t.Errorf("a stranger claiming the allowed guild got %d, want 403", code)
+	}
+	if code := mint("member", "1000"); code != http.StatusOK {
+		t.Errorf("a real member of the allowed guild got %d, want 200", code)
+	}
+	if code := mint("member", "2000"); code != http.StatusForbidden {
+		t.Errorf("a member launching from an unlisted guild got %d, want 403", code)
+	}
+	if code := mint("friend", "2000"); code != http.StatusOK {
+		t.Errorf("an allow listed user got %d, want 200", code)
+	}
+}
+
+func TestTokenRejectsMalformedInputBeforeCallingDiscord(t *testing.T) {
+	calls := 0
+	discordAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, "no", http.StatusUnauthorized)
+	}))
+	defer discordAPI.Close()
+
+	g, err := New(Config{
+		StaticDir:   t.TempDir(),
+		ClientID:    "c",
+		AgentToken:  testAgentToken,
+		Secret:      authz.GenerateSecret(),
+		AllowGuilds: []string{"1000"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.discord.API = discordAPI.URL
+	srv := httptest.NewServer(g.Handler())
+	defer srv.Close()
+
+	for _, body := range []string{
+		`{"code":"short","instanceId":"i-1","guildId":"1000"}`,
+		`{"code":"` + strings.Repeat("a", 30) + `","instanceId":"i-1","guildId":"` + strings.Repeat("x", 4000) + `"}`,
+		`{"code":"` + strings.Repeat("a", 30) + `","instanceId":"` + strings.Repeat("i", 500) + `","guildId":"1000"}`,
+		`{"code":"a b c d e f g h i j k l","instanceId":"i-1","guildId":"1000"}`,
+	} {
+		resp, err := http.Post(srv.URL+"/api/token", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%.60s got %d, want 400", body, resp.StatusCode)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("malformed requests reached discord %d times", calls)
+	}
+}
+
+func TestTokenEndpointIsRateLimited(t *testing.T) {
+	_, srv := newTestGateway(t)
+	limited := false
+	for i := 0; i < 60; i++ {
+		resp, err := http.Post(srv.URL+"/api/token", "application/json", strings.NewReader(`{"instanceId":"i-1"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusTooManyRequests {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Fatal("sixty sign ins in a burst were all accepted, a flood would reach discord unthrottled")
+	}
+}
+
+func TestOneUserCannotOpenUnlimitedSockets(t *testing.T) {
+	g, srv := newTestGateway(t)
+	token, _ := mintSession(t, srv, "room-flood")
+
+	for i := 0; i < maxSocketsPerUser; i++ {
+		wsDial(t, wsURLOf(srv, "/ws/media", "room=room-flood&token="+token), nil)
+	}
+	waitFor(t, "the sockets to join", func() bool {
+		rm, ok := g.rooms.Get("room-flood")
+		return ok && rm.ViewerCount() == maxSocketsPerUser
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	extra := wsDial(t, wsURLOf(srv, "/ws/media", "room=room-flood&token="+token), nil)
+	_, _, err := extra.Read(ctx)
+	if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+		t.Fatalf("socket %d was not refused: %v", maxSocketsPerUser+1, err)
+	}
+
+	rm, _ := g.rooms.Get("room-flood")
+	if n := rm.ViewerCount(); n != maxSocketsPerUser {
+		t.Fatalf("%d sockets held, want %d", n, maxSocketsPerUser)
+	}
+}

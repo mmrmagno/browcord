@@ -10,6 +10,12 @@ networks:
     ipam:
       config:
         - subnet: ${ROOM_SUBNET:-10.89.0.0/24}
+  guard:
+    name: browcord-guard
+    internal: true
+  docker:
+    name: browcord-docker
+    internal: true
 
 services:
   gateway:
@@ -41,8 +47,14 @@ services:
       BROWCORD_FIXED_ROOM: ${BROWCORD_FIXED_ROOM:-main}
       BROWCORD_ROOM_IDLE: ${BROWCORD_ROOM_IDLE:-24h}
       BROWCORD_SESSION_TTL: ${BROWCORD_SESSION_TTL:-8h}
+      BROWCORD_INK_TTL: ${BROWCORD_INK_TTL:-15s}
+      BROWCORD_GUARD_URL: ${BROWCORD_GUARD_URL:-}
+      BROWCORD_GUARD_TOKEN: ${BROWCORD_GUARD_TOKEN:-}
+      BROWCORD_MULTI_IDLE: ${BROWCORD_MULTI_IDLE:-60s}
+      BROWCORD_ROOM_CEILING: ${BROWCORD_ROOM_CEILING:-6h}
     networks:
       proxy:
+      guard:
       rooms:
         ipv4_address: ${GATEWAY_IP:-10.89.0.2}
     expose:
@@ -86,7 +98,87 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  dockerguard:
+    profiles: ["multi"]
+    image: ${GATEWAY_IMAGE:-ghcr.io/mmrmagno/browcord-gateway:latest}
+    container_name: browcord-dockerguard
+    entrypoint: ["/app/dockerguard"]
+    depends_on:
+      - docker-proxy
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 64m
+    pids_limit: 64
+    cpus: 0.5
+    environment:
+      GUARD_TOKEN: ${BROWCORD_GUARD_TOKEN:-}
+      DOCKER_URL: "http://browcord-docker-proxy:2375"
+      ROOM_IMAGE: ${ROOM_IMAGE:-ghcr.io/mmrmagno/browcord-room:latest}
+      ROOM_NETWORK: browcord-rooms
+      ROOM_GATEWAY_URL: "ws://browcord-gateway:8080"
+      ROOM_CAP: ${ROOM_CAP:-2}
+      ROOM_CEILING: ${ROOM_GUARD_CEILING:-6h10m}
+      ROOM_WIDTH: ${ROOM_WIDTH:-1280}
+      ROOM_HEIGHT: ${ROOM_HEIGHT:-720}
+      ROOM_FPS: "30"
+      ROOM_BITRATE_KBPS: "4000"
+      ROOM_ENCODER: ${ROOM_ENCODER:-vp8enc}
+      ROOM_START_URL: ${ROOM_START_URL:-https://duckduckgo.com}
+      ROOM_STALL_SECONDS: ${ROOM_STALL_SECONDS:-30}
+    networks:
+      - guard
+      - docker
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:7070/healthz || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  docker-proxy:
+    profiles: ["multi"]
+    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
+    container_name: browcord-docker-proxy
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 64m
+    pids_limit: 64
+    cpus: 0.5
+    tmpfs:
+      - /run:size=8m
+      - /tmp:size=8m
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      CONTAINERS: "1"
+      POST: "1"
+      ALLOW_START: "1"
+      EVENTS: "0"
+      PING: "1"
+      VERSION: "1"
+    networks:
+      - docker
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   room:
+    profiles: ["single"]
     container_name: browcord-room
     depends_on:
       - gateway
@@ -118,6 +210,7 @@ services:
       ROOM_BITRATE_KBPS: "4000"
       ROOM_ENCODER: ${ROOM_ENCODER:-vp8enc}
       ROOM_START_URL: ${ROOM_START_URL:-https://duckduckgo.com}
+      ROOM_STALL_SECONDS: ${ROOM_STALL_SECONDS:-30}
       BROWCORD_GATEWAY_URL: "ws://browcord-gateway:8080"
       BROWCORD_ROOM_ID: ${BROWCORD_FIXED_ROOM:-main}
       BROWCORD_AGENT_TOKEN: ${BROWCORD_AGENT_TOKEN:?}

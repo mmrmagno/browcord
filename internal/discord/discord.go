@@ -7,19 +7,22 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
 
 const (
-	tokenURL = "https://discord.com/api/oauth2/token"
-	meURL    = "https://discord.com/api/oauth2/@me"
+	apiBase = "https://discord.com/api"
 )
+
+var snowflake = regexp.MustCompile(`^[0-9]{1,20}$`)
 
 type Client struct {
 	ID     string
 	Secret string
 	HTTP   *http.Client
+	API    string
 }
 
 func New(id, secret string) *Client {
@@ -27,6 +30,35 @@ func New(id, secret string) *Client {
 		ID:     id,
 		Secret: secret,
 		HTTP:   &http.Client{Timeout: 10 * time.Second},
+		API:    apiBase,
+	}
+}
+
+func (c *Client) IsMember(ctx context.Context, accessToken, guildID string) (bool, error) {
+	if !snowflake.MatchString(guildID) {
+		return false, fmt.Errorf("discord: guild id %q is not a snowflake", guildID)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.API+"/users/@me/guilds/"+guildID+"/member", nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("discord: membership: %w", err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound:
+		return false, nil
+	default:
+		return false, fmt.Errorf("discord: membership check returned %d", resp.StatusCode)
 	}
 }
 
@@ -57,7 +89,7 @@ func (c *Client) Exchange(ctx context.Context, code string) (string, error) {
 		"code":          {code},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.API+"/oauth2/token", strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", err
 	}
@@ -88,7 +120,7 @@ func (c *Client) Exchange(ctx context.Context, code string) (string, error) {
 }
 
 func (c *Client) Identify(ctx context.Context, accessToken string) (Identity, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, meURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.API+"/oauth2/@me", nil)
 	if err != nil {
 		return Identity{}, err
 	}

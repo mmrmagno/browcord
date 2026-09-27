@@ -102,7 +102,7 @@ func TestAllowListDefaultDenies(t *testing.T) {
 	if empty.Enabled() {
 		t.Error("an empty allow-list must not be considered configured")
 	}
-	if empty.Permit("any-guild", "any-user") {
+	if empty.AllowsGuild("any-guild") || empty.AllowsUser("any-user") {
 		t.Error("an unconfigured allow-list must deny everything, not permit everything")
 	}
 }
@@ -110,16 +110,16 @@ func TestAllowListDefaultDenies(t *testing.T) {
 func TestAllowListPermitsConfiguredOnly(t *testing.T) {
 	a := NewGuildAllowList([]string{"guild-1"}, []string{"user-9"})
 
-	if !a.Permit("guild-1", "someone") {
+	if !a.AllowsGuild("guild-1") {
 		t.Error("allowed guild rejected")
 	}
-	if !a.Permit("other-guild", "user-9") {
+	if !a.AllowsUser("user-9") {
 		t.Error("allowed user rejected")
 	}
-	if a.Permit("other-guild", "someone-else") {
-		t.Error("unknown guild and user permitted")
+	if a.AllowsGuild("other-guild") || a.AllowsUser("someone-else") {
+		t.Error("unknown guild or user permitted")
 	}
-	if a.Permit("", "") {
+	if a.AllowsGuild("") || a.AllowsUser("") {
 		t.Error("empty identifiers permitted")
 	}
 }

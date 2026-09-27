@@ -1,3 +1,4 @@
+import type { EchoEvent } from "./echo";
 import { ControlSocket } from "./transport";
 import { contentBox } from "./viewport";
 
@@ -40,6 +41,7 @@ export class InputBridge {
     private ctl: ControlSocket,
     private onViewChange: () => void,
     private onDraw: (phase: string, x: number, y: number) => void = () => {},
+    private onEcho: (event: EchoEvent) => void = () => {},
   ) {
     this.attachPointer();
     this.attachKeyboard();
@@ -99,6 +101,7 @@ export class InputBridge {
 
       this.textInput.focus({ preventScroll: true });
       const { x, y } = this.normalize(e.clientX, e.clientY);
+      this.onEcho({ kind: "down", x, y });
       this.ctl.send({ type: "click", x, y, button: e.button, down: true });
     });
 
@@ -113,6 +116,7 @@ export class InputBridge {
       }
 
       const { x, y } = this.normalize(e.clientX, e.clientY);
+      this.onEcho({ kind: "up", x, y });
       this.ctl.send({ type: "click", x, y, button: e.button, down: false });
     });
 
@@ -201,6 +205,7 @@ export class InputBridge {
         const { x, y } = this.normalize(t.clientX, t.clientY);
 
         this.longPressTimer = window.setTimeout(() => {
+          this.onEcho({ kind: "long", x, y });
           this.ctl.send({ type: "click", x, y, button: 2, down: true });
           this.ctl.send({ type: "click", x, y, button: 2, down: false });
           this.touchStart = null;
@@ -264,6 +269,7 @@ export class InputBridge {
       const heldFor = performance.now() - this.touchStart.at;
       if (heldFor < 500) {
         const { x, y } = this.normalize(this.touchStart.x, this.touchStart.y);
+        this.onEcho({ kind: "tap", x, y });
         this.ctl.send({ type: "click", x, y, button: 0, down: true });
         this.ctl.send({ type: "click", x, y, button: 0, down: false });
         this.textInput.focus({ preventScroll: true });

@@ -46,7 +46,53 @@ const (
 	CtlHello    = "hello"
 	CtlDraw     = "draw"
 	CtlCanvas   = "canvas"
+	CtlStatus   = "status"
 )
+
+const (
+	StatusLive       = "live"
+	StatusOffline    = "offline"
+	StatusRecovering = "recovering"
+	StatusFull       = "full"
+	StatusEnding     = "ending"
+)
+
+const AgentRestart = "restart"
+
+var agentTypes = map[string]bool{
+	AgentRestart: true,
+}
+
+type AgentCmd struct {
+	Type   string `json:"type"`
+	Reason string `json:"reason,omitempty"`
+}
+
+func (c AgentCmd) Encode() []byte {
+	out, err := json.Marshal(c)
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+func ParseAgentCmd(data []byte) (AgentCmd, error) {
+	if len(data) > MaxCtlBytes {
+		return AgentCmd{}, fmt.Errorf("%w: %d bytes", ErrCtlTooLarge, len(data))
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+
+	var c AgentCmd
+	if err := dec.Decode(&c); err != nil {
+		return AgentCmd{}, fmt.Errorf("%w: %v", ErrCtlMalformed, err)
+	}
+	if !agentTypes[c.Type] {
+		return AgentCmd{}, fmt.Errorf("%w: %q", ErrCtlUnknown, c.Type)
+	}
+	return c, nil
+}
 
 const (
 	ScopeMine = "mine"
@@ -205,6 +251,8 @@ type ServerMessage struct {
 	Width    int      `json:"width,omitempty"`
 	Height   int      `json:"height,omitempty"`
 	Codecs   []string `json:"codecs,omitempty"`
+	State    string   `json:"state,omitempty"`
+	InkTTL   int64    `json:"inkTtl,omitempty"`
 }
 
 func (m ServerMessage) Encode() []byte {

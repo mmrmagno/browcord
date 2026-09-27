@@ -88,6 +88,11 @@ func New(id string) *Room {
 }
 
 func (r *Room) Join(viewerID, userID, name string) *Viewer {
+	v, _ := r.Admit(viewerID, userID, name, 0, 0)
+	return v
+}
+
+func (r *Room) Admit(viewerID, userID, name string, perUser, total int) (*Viewer, bool) {
 	v := &Viewer{
 		ID:     viewerID,
 		UserID: userID,
@@ -97,6 +102,22 @@ func (r *Room) Join(viewerID, userID, name string) *Viewer {
 	}
 
 	r.mu.Lock()
+	if total > 0 && len(r.viewers) >= total {
+		r.mu.Unlock()
+		return nil, false
+	}
+	if perUser > 0 {
+		mine := 0
+		for _, other := range r.viewers {
+			if other.UserID == userID {
+				mine++
+			}
+		}
+		if mine >= perUser {
+			r.mu.Unlock()
+			return nil, false
+		}
+	}
 	r.viewers[viewerID] = v
 	config := r.videoConfig
 	audio := r.audioConfig
@@ -107,8 +128,6 @@ func (r *Room) Join(viewerID, userID, name string) *Viewer {
 	if len(r.strokes) > 0 {
 		v.Ctl <- wire.ServerMessage{Type: wire.CtlCanvas, Strokes: r.inkSnapshotLocked()}.Encode()
 	}
-	r.mu.Unlock()
-
 	if config != nil {
 		sendMedia(v, *config)
 	}
@@ -118,8 +137,9 @@ func (r *Room) Join(viewerID, userID, name string) *Viewer {
 	if keyframe != nil {
 		sendMedia(v, *keyframe)
 	}
+	r.mu.Unlock()
 
-	return v
+	return v, true
 }
 
 func (r *Room) Leave(viewerID string) {
@@ -154,6 +174,19 @@ func (r *Room) Leave(viewerID string) {
 	}
 }
 
+func (r *Room) Evict() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for id, v := range r.viewers {
+		delete(r.viewers, id)
+		close(v.Media)
+		close(v.Ctl)
+	}
+	r.cursors = make(map[string]Cursor)
+	r.emptySince = time.Now()
+}
+
 func (r *Room) ViewerCount() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -168,6 +201,20 @@ func (r *Room) EmptyFor() time.Duration {
 		return 0
 	}
 	return time.Since(r.emptySince)
+}
+
+func (r *Room) LastChunkAt() time.Time {
+	last := r.lastChunk.Load()
+	if last == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, last)
+}
+
+func (r *Room) HasVideo() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.videoConfig != nil
 }
 
 func (r *Room) ResetStream() {
@@ -201,14 +248,16 @@ func (r *Room) Stats() Stats {
 	hasVideo := r.videoConfig != nil
 	r.mu.RUnlock()
 
+	now := time.Now().UnixNano()
+
 	idle := int64(-1)
 	if last := r.lastChunk.Load(); last > 0 {
-		idle = time.Now().Unix() - last
+		idle = (now - last) / int64(time.Second)
 	}
 
 	audioIdle := int64(-1)
 	if last := r.lastAudio.Load(); last > 0 {
-		audioIdle = time.Now().Unix() - last
+		audioIdle = (now - last) / int64(time.Second)
 	}
 
 	return Stats{
@@ -227,14 +276,14 @@ func (r *Room) Stats() Stats {
 func (r *Room) Publish(c wire.Chunk) {
 	r.chunks.Add(1)
 	r.bytes.Add(int64(len(c.Payload)))
-	r.lastChunk.Store(time.Now().Unix())
+	r.lastChunk.Store(time.Now().UnixNano())
 
 	switch c.Type {
 	case wire.VideoKey, wire.VideoDelta:
 		r.videoChunks.Add(1)
 	case wire.Audio:
 		r.audioChunks.Add(1)
-		r.lastAudio.Store(time.Now().Unix())
+		r.lastAudio.Store(time.Now().UnixNano())
 	}
 
 	r.mu.Lock()
@@ -250,13 +299,9 @@ func (r *Room) Publish(c wire.Chunk) {
 		r.lastKeyframe = &stored
 	}
 
-	viewers := make([]*Viewer, 0, len(r.viewers))
-	for _, v := range r.viewers {
-		viewers = append(viewers, v)
-	}
-	r.mu.Unlock()
+	defer r.mu.Unlock()
 
-	for _, v := range viewers {
+	for _, v := range r.viewers {
 		if v.needsKeyframe.Load() {
 			if c.Type != wire.VideoKey && c.Type != wire.VideoConfig && c.Type != wire.AudioConfig {
 				continue
@@ -289,13 +334,9 @@ func sendMedia(v *Viewer, c wire.Chunk) {
 
 func (r *Room) BroadcastCtl(payload []byte) {
 	r.mu.RLock()
-	viewers := make([]*Viewer, 0, len(r.viewers))
-	for _, v := range r.viewers {
-		viewers = append(viewers, v)
-	}
-	r.mu.RUnlock()
+	defer r.mu.RUnlock()
 
-	for _, v := range viewers {
+	for _, v := range r.viewers {
 		func() {
 			defer func() { _ = recover() }()
 			select {
@@ -308,13 +349,9 @@ func (r *Room) BroadcastCtl(payload []byte) {
 
 func (r *Room) BroadcastInk(payload []byte) {
 	r.mu.RLock()
-	viewers := make([]*Viewer, 0, len(r.viewers))
-	for _, v := range r.viewers {
-		viewers = append(viewers, v)
-	}
-	r.mu.RUnlock()
+	defer r.mu.RUnlock()
 
-	for _, v := range viewers {
+	for _, v := range r.viewers {
 		func() {
 			defer func() { _ = recover() }()
 			select {
@@ -466,6 +503,17 @@ func (reg *Registry) Count() int {
 	reg.mu.Lock()
 	defer reg.mu.Unlock()
 	return len(reg.rooms)
+}
+
+func (reg *Registry) All() []*Room {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+
+	rooms := make([]*Room, 0, len(reg.rooms))
+	for _, r := range reg.rooms {
+		rooms = append(rooms, r)
+	}
+	return rooms
 }
 
 func (reg *Registry) AllStats() []Stats {

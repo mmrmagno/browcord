@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/mmrmagno/browcord/internal/agent"
 	"github.com/mmrmagno/browcord/internal/capture"
@@ -22,6 +23,7 @@ func main() {
 		Token:       os.Getenv("BROWCORD_AGENT_TOKEN"),
 		CDPEndpoint: envOr("BROWCORD_CDP", "http://127.0.0.1:9222"),
 		StartURL:    envOr("ROOM_START_URL", "https://duckduckgo.com"),
+		StallWindow: time.Duration(envInt("ROOM_STALL_SECONDS", 30)) * time.Second,
 		Capture: capture.Config{
 			Source:           capture.Source(envOr("ROOM_SOURCE", "x11")),
 			Display:          envOr("DISPLAY", ":0"),

@@ -23,6 +23,7 @@ type Config struct {
 	Token       string
 	CDPEndpoint string
 	StartURL    string
+	StallWindow time.Duration
 	Capture     capture.Config
 }
 
@@ -46,6 +47,8 @@ type Agent struct {
 	mu     sync.Mutex
 	conn   *websocket.Conn
 	cancel context.CancelFunc
+
+	fail func(error)
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -79,11 +82,22 @@ func Run(ctx context.Context, cfg Config) error {
 		log.Printf("agent: start url refused: %v", err)
 	}
 
+	cfg.Capture.Probe = cfg.StallWindow > 0
 	pipeline, err := capture.New(cfg.Capture, a.publish)
 	if err != nil {
 		return fmt.Errorf("agent: capture: %w", err)
 	}
 	defer pipeline.Stop()
+
+	samples := make(chan probeSample, 4)
+	if cfg.Capture.Probe {
+		pipeline.OnProbe(func(hash uint64, err error) {
+			select {
+			case samples <- probeSample{hash: hash, err: err}:
+			default:
+			}
+		})
+	}
 
 	if err := pipeline.Start(); err != nil {
 		return fmt.Errorf("agent: start capture: %w", err)
@@ -92,20 +106,27 @@ func Run(ctx context.Context, cfg Config) error {
 	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
 
-	fatal := make(chan string, 1)
+	fatal := make(chan error, 1)
+	a.fail = func(err error) {
+		select {
+		case fatal <- err:
+			cancelRun()
+		default:
+		}
+	}
+
 	go pipeline.WatchBus(runCtx, func(kind gst.MessageType, detail string) {
 		if kind == gst.MessageWarning {
 			log.Printf("agent: capture warning: %s", detail)
 			return
 		}
 		log.Printf("agent: capture stopped: %s", detail)
-		select {
-		case fatal <- detail:
-			cancelRun()
-		default:
-		}
+		a.fail(fmt.Errorf("agent: capture pipeline failed: %s", detail))
 	})
 
+	if cfg.Capture.Probe {
+		go a.watchPaint(runCtx, samples, cfg.StallWindow, a.confirmPaint)
+	}
 	go a.watchNavigation(runCtx)
 	go a.keepOneTab(runCtx, target.ID)
 
@@ -129,10 +150,10 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 }
 
-func captureFailure(fatal chan string) error {
+func captureFailure(fatal chan error) error {
 	select {
-	case detail := <-fatal:
-		return fmt.Errorf("agent: capture pipeline failed: %s", detail)
+	case err := <-fatal:
+		return err
 	default:
 		return nil
 	}
@@ -353,6 +374,11 @@ func (a *Agent) readCommands(ctx context.Context, conn *websocket.Conn) error {
 			continue
 		}
 
+		if cmd, err := wire.ParseAgentCmd(data); err == nil {
+			a.handleAgentCmd(cmd)
+			continue
+		}
+
 		msg, err := wire.ParseCtl(data)
 		if err != nil {
 			log.Printf("agent: rejected command: %v", err)
@@ -363,5 +389,13 @@ func (a *Agent) readCommands(ctx context.Context, conn *websocket.Conn) error {
 			log.Printf("agent: %s failed: %v", msg.Type, err)
 			a.send(ctx, wire.ServerMessage{Type: wire.CtlError, Message: explain(msg, err)})
 		}
+	}
+}
+
+func (a *Agent) handleAgentCmd(cmd wire.AgentCmd) {
+	switch cmd.Type {
+	case wire.AgentRestart:
+		log.Printf("agent: gateway asked for a restart: %s", cmd.Reason)
+		a.fail(fmt.Errorf("agent: restart requested by the gateway: %s", cmd.Reason))
 	}
 }

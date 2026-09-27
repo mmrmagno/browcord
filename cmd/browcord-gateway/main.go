@@ -12,6 +12,7 @@ import (
 
 	"github.com/mmrmagno/browcord/internal/authz"
 	"github.com/mmrmagno/browcord/internal/gateway"
+	"github.com/mmrmagno/browcord/internal/supervisor"
 )
 
 func main() {
@@ -33,9 +34,25 @@ func main() {
 		AllowGuilds:  splitList(os.Getenv("BROWCORD_ALLOW_GUILDS")),
 		AllowUsers:   splitList(os.Getenv("BROWCORD_ALLOW_USERS")),
 		RoomIdle:     envDuration("BROWCORD_ROOM_IDLE", 60*time.Second),
+		InkTTL:       envDuration("BROWCORD_INK_TTL", 15*time.Second),
 		SessionTTL:   envDuration("BROWCORD_SESSION_TTL", 8*time.Hour),
 		DevIdentity:  os.Getenv("BROWCORD_DEV_IDENTITY") == "1",
 		FixedRoom:    os.Getenv("BROWCORD_FIXED_ROOM"),
+	}
+
+	if guardURL := os.Getenv("BROWCORD_GUARD_URL"); guardURL != "" {
+		if os.Getenv("BROWCORD_SECRET") == "" || len(secret) < 32 {
+			log.Fatal("gateway: multi room needs a BROWCORD_SECRET of at least 32 bytes, per room agent tokens are derived from it")
+		}
+		sup, err := supervisor.New(guardURL, os.Getenv("BROWCORD_GUARD_TOKEN"))
+		if err != nil {
+			log.Fatalf("gateway: %v", err)
+		}
+		cfg.Supervisor = sup
+		cfg.FixedRoom = ""
+		cfg.RoomCeiling = envDuration("BROWCORD_ROOM_CEILING", 6*time.Hour)
+		cfg.RoomIdle = envDuration("BROWCORD_MULTI_IDLE", 60*time.Second)
+		log.Printf("gateway: multi room, rooms are started through %s", guardURL)
 	}
 
 	if cfg.DevIdentity {

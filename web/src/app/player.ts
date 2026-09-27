@@ -1,4 +1,5 @@
 import { Chunk, ChunkType, codecFromParameterSets } from "./transport";
+import { PtsWatch } from "./discontinuity";
 import { RestartBudget } from "./restart";
 
 const AUDIO_BUFFER_MIN_S = 0.04;
@@ -39,6 +40,7 @@ export class Player {
   private audioSamples = 0;
   private audioNeed = AUDIO_BUFFER_MIN_S;
   private restarts = new RestartBudget(VIDEO_RESTART_LIMIT, VIDEO_RESTART_WINDOW_MS);
+  private ptsWatch = new PtsWatch();
 
   decoded = 0;
   dropped = 0;
@@ -58,6 +60,7 @@ export class Player {
   audioOffsetMs = 0;
   videoOffsetMs = 0;
   videoRestarts = 0;
+  resyncs = 0;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -86,6 +89,12 @@ export class Player {
   }
 
   push(chunk: Chunk): void {
+    const media = chunk.type === ChunkType.VideoKey || chunk.type === ChunkType.VideoDelta || chunk.type === ChunkType.Audio;
+    if (media && this.ptsWatch.observe(chunk.pts)) {
+      this.resync();
+      this.onRecover(`stream timeline restarted at pts ${chunk.pts}`);
+    }
+
     switch (chunk.type) {
       case ChunkType.VideoConfig:
         void this.configureVideo(chunk);
@@ -451,6 +460,23 @@ export class Player {
     } finally {
       frame.close();
     }
+  }
+
+  resync(): void {
+    this.drain();
+    this.started = false;
+    this.videoSamples = 0;
+    this.arrivalOffset = 0;
+    this.videoOffset = 0;
+    this.audioSamples = 0;
+    this.audioArrival = 0;
+    this.nextAudioAt = 0;
+    this.audioLocked = false;
+    this.skewCaptured = false;
+    this.lastPts = -1;
+    this.ptsDelta = 0;
+    this.ptsWatch.reset();
+    this.resyncs++;
   }
 
   private drain(): void {

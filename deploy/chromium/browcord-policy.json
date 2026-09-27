@@ -1,0 +1,21 @@
+{
+  "URLBlocklist": [
+    "127.0.0.1",
+    "localhost",
+    "[::1]",
+    "0.0.0.0",
+    "file://*",
+    "chrome://*",
+    "devtools://*",
+    "view-source:*"
+  ],
+  "URLAllowlist": [
+    "chrome://omnibox-popup.top-chrome"
+  ],
+  "PrintingEnabled": false,
+  "AllowFileSelectionDialogs": false,
+  "DownloadRestrictions": 3,
+  "PasswordManagerEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false
+}

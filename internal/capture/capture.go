@@ -2,6 +2,7 @@ package capture
 
 import (
 	"fmt"
+	"hash/fnv"
 	"io"
 	"math"
 	"strings"
@@ -56,7 +57,15 @@ type Config struct {
 	Audio            bool
 	AudioDevice      string
 	AudioBitrate     int
+	TestPattern      string
+	Probe            bool
 }
+
+const (
+	ProbeWidth  = 64
+	ProbeHeight = 36
+	ProbeBytes  = ProbeWidth * ProbeHeight
+)
 
 func (c *Config) applyDefaults() {
 	if c.Source == "" {
@@ -88,6 +97,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.AudioBitrate == 0 {
 		c.AudioBitrate = 128000
+	}
+	if c.TestPattern == "" {
+		c.TestPattern = "smpte"
 	}
 }
 
@@ -122,6 +134,7 @@ type Pipeline struct {
 
 	mu         sync.Mutex
 	sentConfig bool
+	probe      func(uint64, error)
 }
 
 var initOnce sync.Once
@@ -157,6 +170,11 @@ func New(cfg Config, sink Sink) (*Pipeline, error) {
 			return nil, err
 		}
 	}
+	if cfg.Probe {
+		if err := p.attach("probe", p.onProbe); err != nil {
+			return nil, err
+		}
+	}
 
 	return p, nil
 }
@@ -168,8 +186,8 @@ func Description(cfg Config) string {
 	var source string
 	switch cfg.Source {
 	case SourceTest:
-		source = fmt.Sprintf("videotestsrc is-live=true pattern=smpte ! video/x-raw,width=%d,height=%d,framerate=%d/1",
-			cfg.Width, cfg.Height, cfg.FPS)
+		source = fmt.Sprintf("videotestsrc is-live=true pattern=%s ! video/x-raw,width=%d,height=%d,framerate=%d/1",
+			cfg.TestPattern, cfg.Width, cfg.Height, cfg.FPS)
 	default:
 		source = fmt.Sprintf("ximagesrc display-name=%s use-damage=false show-pointer=false ! video/x-raw,framerate=%d/1",
 			cfg.Display, cfg.FPS)
@@ -179,9 +197,13 @@ func Description(cfg Config) string {
 		source,
 		"videoconvert",
 		"video/x-raw,format=I420",
-		"queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream",
-		encoderDescription(cfg),
 	}
+	if cfg.Probe {
+		parts = append(parts, "tee name=split", "queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream")
+	} else {
+		parts = append(parts, "queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream")
+	}
+	parts = append(parts, encoderDescription(cfg))
 
 	if ResolveEncoder(cfg.Encoder).isH264() {
 		parts = append(parts,
@@ -193,6 +215,21 @@ func Description(cfg Config) string {
 	parts = append(parts, "appsink name=video emit-signals=true sync=false max-buffers=1 drop=true")
 
 	desc := strings.Join(parts, " ! ")
+
+	if cfg.Probe {
+		probe := []string{
+			"split.",
+			"queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream",
+			"videorate drop-only=true",
+			"video/x-raw,framerate=1/1",
+			"videoscale",
+			fmt.Sprintf("video/x-raw,width=%d,height=%d", ProbeWidth, ProbeHeight),
+			"videoconvert",
+			"video/x-raw,format=GRAY8",
+			"appsink name=probe emit-signals=true sync=false max-buffers=1 drop=true",
+		}
+		desc += " " + strings.Join(probe, " ! ")
+	}
 
 	if cfg.Audio {
 		audio := []string{
@@ -317,6 +354,39 @@ func (p *Pipeline) configSeen() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.sentConfig
+}
+
+func (p *Pipeline) OnProbe(fn func(uint64, error)) {
+	p.mu.Lock()
+	p.probe = fn
+	p.mu.Unlock()
+}
+
+func (p *Pipeline) onProbe(sink gstapp.AppSink) gst.FlowReturn {
+	data, _, _, flow := pull(sink)
+	if flow != gst.FlowOK {
+		return flow
+	}
+
+	p.mu.Lock()
+	fn := p.probe
+	p.mu.Unlock()
+	if fn == nil {
+		return gst.FlowOK
+	}
+
+	hash, err := HashProbe(data)
+	fn(hash, err)
+	return gst.FlowOK
+}
+
+func HashProbe(frame []byte) (uint64, error) {
+	if len(frame) != ProbeBytes {
+		return 0, fmt.Errorf("capture: probe frame is %d bytes, want %d", len(frame), ProbeBytes)
+	}
+	h := fnv.New64a()
+	_, _ = h.Write(frame)
+	return h.Sum64(), nil
 }
 
 func (p *Pipeline) onAudio(sink gstapp.AppSink) gst.FlowReturn {

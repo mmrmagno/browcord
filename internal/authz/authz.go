@@ -135,17 +135,16 @@ func (a *GuildAllowList) Enabled() bool {
 	return a.enabled
 }
 
-func (a *GuildAllowList) Permit(guildID, userID string) bool {
+func (a *GuildAllowList) AllowsUser(userID string) bool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+	return a.enabled && userID != "" && a.users[userID]
+}
 
-	if !a.enabled {
-		return false
-	}
-	if guildID != "" && a.guilds[guildID] {
-		return true
-	}
-	return userID != "" && a.users[userID]
+func (a *GuildAllowList) AllowsGuild(guildID string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.enabled && guildID != "" && a.guilds[guildID]
 }
 
 type Limiter struct {
