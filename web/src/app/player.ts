@@ -6,6 +6,9 @@ const AUDIO_BUFFER_MIN_S = 0.04;
 const AUDIO_BUFFER_MAX_S = 0.2;
 const AUDIO_JITTER_K = 2.5;
 const AUDIO_RESYNC_S = 0.05;
+const AUDIO_WARMUP_S = 60;
+const AUDIO_WARMUP_BUFFER_S = 0.15;
+const AUDIO_WARMUP_RESYNC_S = 0.15;
 const VIDEO_OFFSET_ALPHA = 0.05;
 const VIDEO_OFFSET_SAMPLES = 10;
 const VIDEO_JITTER_ALPHA = 0.05;
@@ -39,6 +42,7 @@ export class Player {
   private audioArrival = 0;
   private audioSamples = 0;
   private audioNeed = AUDIO_BUFFER_MIN_S;
+  private audioStartAt = 0;
   private restarts = new RestartBudget(VIDEO_RESTART_LIMIT, VIDEO_RESTART_WINDOW_MS);
   private ptsWatch = new PtsWatch();
 
@@ -300,6 +304,7 @@ export class Player {
 
       if (this.audioSamples === 0) {
         this.audioArrival = arrival;
+        this.audioStartAt = now;
       } else {
         const deviation = Math.abs(arrival - this.audioArrival);
         this.audioJitterMs += VIDEO_JITTER_ALPHA * (deviation * 1000 - this.audioJitterMs);
@@ -307,8 +312,12 @@ export class Player {
       }
       this.audioSamples++;
 
+      const warming = now - this.audioStartAt < AUDIO_WARMUP_S;
       const bufferS = Math.min(
-        AUDIO_BUFFER_MIN_S + (AUDIO_JITTER_K * this.audioJitterMs) / 1000,
+        Math.max(
+          AUDIO_BUFFER_MIN_S + (AUDIO_JITTER_K * this.audioJitterMs) / 1000,
+          warming ? AUDIO_WARMUP_BUFFER_S : AUDIO_BUFFER_MIN_S,
+        ),
         AUDIO_BUFFER_MAX_S,
       );
       this.audioBufferMs = bufferS * 1000;
@@ -325,7 +334,8 @@ export class Player {
 
       if (this.videoSamples >= VIDEO_OFFSET_SAMPLES) {
         const target = stamp + this.videoOffset;
-        const adrift = !this.audioLocked || Math.abs(start - target) > AUDIO_RESYNC_S;
+        const tolerance = warming ? AUDIO_WARMUP_RESYNC_S : AUDIO_RESYNC_S;
+        const adrift = !this.audioLocked || Math.abs(start - target) > tolerance;
         if (adrift && target >= floor) {
           if (!this.skewCaptured) {
             this.syncSkewMs = (target - start) * 1000;
