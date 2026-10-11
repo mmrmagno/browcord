@@ -542,7 +542,7 @@ func (g *Gateway) viewerCtl(w http.ResponseWriter, r *http.Request) {
 
 	rm := g.rooms.GetOrCreate(sess.RoomID)
 	viewerID := randomID()
-	v, admitted := rm.Admit(viewerID, sess.UserID, sess.Name, maxSocketsPerUser, maxSocketsPerRoom)
+	v, admitted := rm.AdmitControl(viewerID, sess.UserID, sess.Name, maxSocketsPerUser, maxSocketsPerRoom)
 	if !admitted {
 		conn.Close(websocket.StatusPolicyViolation, "too many connections")
 		return

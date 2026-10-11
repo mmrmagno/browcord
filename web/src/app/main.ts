@@ -595,17 +595,21 @@ async function main(): Promise<void> {
 
     void player.unlockAudio().then((state) => {
       void reportClient(identity, "audio-unlock", `state=${state}`, player.codec, player.decoded);
+      const playback = () =>
+        `state=${player.audioState} played=${player.audioPlayed} dropped=${player.audioDropped} ` +
+        `skew=${Math.round(player.syncSkewMs)}ms resyncs=${player.audioResyncs} timeline=${player.resyncs} underruns=${player.audioUnderruns} ` +
+        `audioOffset=${Math.round(player.audioOffsetMs)}ms videoOffset=${Math.round(player.videoOffsetMs)}ms ` +
+        `netJitter=${Math.round(player.videoJitterMs)}ms srcJitter=${Math.round(player.sourceJitterMs)}ms ` +
+        `audioJitter=${Math.round(player.audioJitterMs)}ms audioBuffer=${Math.round(player.audioBufferMs)}ms ` +
+        `lead=${Math.round(player.videoLeadMs)}ms lateFrames=${player.videoDropped}`;
       window.setTimeout(() => {
-        const detail =
-          `state=${player.audioState} played=${player.audioPlayed} dropped=${player.audioDropped} ` +
-          `skew=${Math.round(player.syncSkewMs)}ms resyncs=${player.audioResyncs} timeline=${player.resyncs} underruns=${player.audioUnderruns} ` +
-          `audioOffset=${Math.round(player.audioOffsetMs)}ms videoOffset=${Math.round(player.videoOffsetMs)}ms ` +
-          `netJitter=${Math.round(player.videoJitterMs)}ms srcJitter=${Math.round(player.sourceJitterMs)}ms ` +
-          `audioJitter=${Math.round(player.audioJitterMs)}ms audioBuffer=${Math.round(player.audioBufferMs)}ms ` +
-          `lead=${Math.round(player.videoLeadMs)}ms lateFrames=${player.videoDropped}`;
         const event = player.audioPlayed > 0 ? "audio-playing" : "audio-silent";
-        void reportClient(identity, event, detail, player.codec, player.audioPlayed);
+        void reportClient(identity, event, playback(), player.codec, player.audioPlayed);
       }, 8000);
+      window.setInterval(() => {
+        if (document.visibilityState !== "visible") return;
+        void reportClient(identity, "playback", playback(), player.codec, player.decoded);
+      }, 20000);
     });
   });
 }

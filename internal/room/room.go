@@ -94,12 +94,22 @@ func (r *Room) Join(viewerID, userID, name string) *Viewer {
 }
 
 func (r *Room) Admit(viewerID, userID, name string, perUser, total int) (*Viewer, bool) {
+	return r.admit(viewerID, userID, name, perUser, total, true)
+}
+
+func (r *Room) AdmitControl(viewerID, userID, name string, perUser, total int) (*Viewer, bool) {
+	return r.admit(viewerID, userID, name, perUser, total, false)
+}
+
+func (r *Room) admit(viewerID, userID, name string, perUser, total int, media bool) (*Viewer, bool) {
 	v := &Viewer{
 		ID:     viewerID,
 		UserID: userID,
 		Name:   name,
-		Media:  make(chan []byte, mediaBuffer),
 		Ctl:    make(chan []byte, ctlBuffer),
+	}
+	if media {
+		v.Media = make(chan []byte, mediaBuffer)
 	}
 
 	r.mu.Lock()
@@ -129,14 +139,12 @@ func (r *Room) Admit(viewerID, userID, name string, perUser, total int) (*Viewer
 	if len(r.strokes) > 0 {
 		v.Ctl <- wire.ServerMessage{Type: wire.CtlCanvas, Strokes: r.inkSnapshotLocked()}.Encode()
 	}
-	if config != nil {
-		sendMedia(v, *config)
-	}
-	if audio != nil {
-		sendMedia(v, *audio)
-	}
-	if keyframe != nil {
-		sendMedia(v, *keyframe)
+	if v.Media != nil {
+		for _, c := range []*wire.Chunk{config, audio, keyframe} {
+			if c != nil {
+				sendMedia(v, *c)
+			}
+		}
 	}
 	r.mu.Unlock()
 
@@ -167,8 +175,7 @@ func (r *Room) Leave(viewerID string) {
 		delete(r.pens, v.UserID)
 	}
 
-	close(v.Media)
-	close(v.Ctl)
+	closeViewer(v)
 
 	if len(r.viewers) == 0 {
 		r.emptySince = time.Now()
@@ -181,8 +188,7 @@ func (r *Room) Evict() {
 
 	for id, v := range r.viewers {
 		delete(r.viewers, id)
-		close(v.Media)
-		close(v.Ctl)
+		closeViewer(v)
 	}
 	r.cursors = make(map[string]Cursor)
 	r.emptySince = time.Now()
@@ -305,6 +311,9 @@ func (r *Room) Publish(c wire.Chunk) {
 	defer r.mu.Unlock()
 
 	for _, v := range r.viewers {
+		if v.Media == nil {
+			continue
+		}
 		if v.needsKeyframe.Load() {
 			if c.Type == wire.VideoDelta {
 				continue
@@ -317,6 +326,13 @@ func (r *Room) Publish(c wire.Chunk) {
 			r.dropped.Add(1)
 		}
 	}
+}
+
+func closeViewer(v *Viewer) {
+	if v.Media != nil {
+		close(v.Media)
+	}
+	close(v.Ctl)
 }
 
 func sendMedia(v *Viewer, c wire.Chunk) (sent bool) {
