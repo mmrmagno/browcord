@@ -537,3 +537,28 @@ func TestJoinColourIsRandomButNeverShared(t *testing.T) {
 		used[c] = user
 	}
 }
+
+func TestAudioKeepsFlowingWhileVideoWaitsForAKeyframe(t *testing.T) {
+	r := New("room-1")
+	v := r.Join("v1", "user-1", "marcos")
+	drain(v)
+
+	r.Publish(chunk(wire.VideoConfig, 0))
+	r.Publish(chunk(wire.VideoKey, 0))
+	drain(v)
+
+	for i := 0; i < mediaBuffer+10; i++ {
+		r.Publish(chunk(wire.VideoDelta, uint64(i+1)))
+	}
+	drain(v)
+	if r.Stats().Dropped == 0 {
+		t.Fatal("dropped chunks are not counted in the room stats")
+	}
+
+	r.Publish(chunk(wire.VideoDelta, 9000))
+	r.Publish(chunk(wire.Audio, 9001))
+	got := drain(v)
+	if len(got) != 1 || got[0].Type != wire.Audio {
+		t.Errorf("while waiting for a keyframe the viewer got %v, want only the audio chunk", got)
+	}
+}

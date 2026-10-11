@@ -12,12 +12,14 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gateway ./cmd/browcord-gateway
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/dockerguard ./cmd/browcord-dockerguard
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/k8sguard ./cmd/browcord-k8sguard
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates wget && adduser -D -u 10001 browcord
 WORKDIR /app
 COPY --from=build /out/gateway /app/gateway
 COPY --from=build /out/dockerguard /app/dockerguard
+COPY --from=build /out/k8sguard /app/k8sguard
 COPY deploy/seccomp/chromium.json /app/seccomp/chromium.json
 COPY --from=web /build/dist /app/web/dist
 USER browcord

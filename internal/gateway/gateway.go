@@ -51,6 +51,8 @@ type Config struct {
 	Supervisor   Supervisor
 	RoomCeiling  time.Duration
 	MetricsAddr  string
+	PingInterval time.Duration
+	PingTimeout  time.Duration
 }
 
 func (c *Config) applyDefaults() {
@@ -71,6 +73,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.InkTTL == 0 {
 		c.InkTTL = 15 * time.Second
+	}
+	if c.PingInterval == 0 {
+		c.PingInterval = 25 * time.Second
+	}
+	if c.PingTimeout == 0 {
+		c.PingTimeout = 10 * time.Second
 	}
 }
 
@@ -133,13 +141,13 @@ func New(cfg Config) (*Gateway, error) {
 func (g *Gateway) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", g.health)
-	mux.HandleFunc("/api/stats", g.stats)
+	mux.Handle("/api/stats", internalOnly(http.HandlerFunc(g.stats)))
 	mux.HandleFunc("/api/config", g.config)
 	mux.HandleFunc("/api/token", g.token)
 	mux.HandleFunc("/api/clientlog", g.clientLog)
 	mux.HandleFunc("/ws/ctl", g.viewerCtl)
 	mux.HandleFunc("/ws/media", g.viewerMedia)
-	mux.HandleFunc("/agent", g.agent)
+	mux.Handle("/agent", internalOnly(http.HandlerFunc(g.agent)))
 	mux.Handle("/", noStore(http.FileServer(http.Dir(g.cfg.StaticDir))))
 
 	return stripProxyPrefix(mux)
@@ -152,6 +160,16 @@ func noStore(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Pragma", "no-cache")
 		w.Header().Set("Expires", "0")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func internalOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Cf-Connecting-Ip") != "" || r.Header.Get("Cf-Ray") != "" {
+			http.NotFound(w, r)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -765,7 +783,7 @@ func (g *Gateway) agent(w http.ResponseWriter, r *http.Request) {
 	log.Printf("gateway: agent connected for room %s", roomID)
 
 	ctx := r.Context()
-	go pingAgent(ctx, conn)
+	go pingAgent(ctx, conn, g.cfg.PingInterval, g.cfg.PingTimeout)
 
 	for {
 		typ, data, err := conn.Read(ctx)

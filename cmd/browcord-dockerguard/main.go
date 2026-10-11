@@ -12,17 +12,8 @@ import (
 	"time"
 
 	"github.com/mmrmagno/browcord/internal/dockerguard"
+	"github.com/mmrmagno/browcord/internal/roomspec"
 )
-
-var passthrough = []string{
-	"ROOM_WIDTH",
-	"ROOM_HEIGHT",
-	"ROOM_FPS",
-	"ROOM_BITRATE_KBPS",
-	"ROOM_ENCODER",
-	"ROOM_START_URL",
-	"ROOM_STALL_SECONDS",
-}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -38,7 +29,7 @@ func main() {
 	}
 
 	env := map[string]string{}
-	for _, key := range passthrough {
+	for _, key := range roomspec.PassthroughEnv {
 		if v := os.Getenv(key); v != "" {
 			env[key] = v
 		}

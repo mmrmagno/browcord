@@ -456,6 +456,7 @@ export class Player {
 
   private paint(frame: VideoFrame): void {
     try {
+      this.resize(frame.displayWidth, frame.displayHeight);
       this.ctx.drawImage(frame, 0, 0, this.canvas.width, this.canvas.height);
     } finally {
       frame.close();
@@ -532,7 +533,7 @@ export async function decodeSupported(): Promise<boolean> {
   if (typeof VideoDecoder === "undefined") return false;
   for (const codec of ["vp8", "avc1.640028", "avc1.42e028", "avc1.4d0028"]) {
     try {
-      const support = await VideoDecoder.isConfigSupported({ codec, codedWidth: 1280, codedHeight: 720 });
+      const support = await VideoDecoder.isConfigSupported({ codec, codedWidth: 1920, codedHeight: 1080 });
       if (support.supported) return true;
     } catch {
       // try the next candidate profile

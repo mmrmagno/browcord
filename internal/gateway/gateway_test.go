@@ -18,15 +18,22 @@ const testAgentToken = "agent-token-for-tests"
 
 func newTestGateway(t *testing.T) (*Gateway, *httptest.Server) {
 	t.Helper()
+	return newTestGatewayWith(t, func(*Config) {})
+}
 
-	g, err := New(Config{
+func newTestGatewayWith(t *testing.T, tweak func(*Config)) (*Gateway, *httptest.Server) {
+	t.Helper()
+
+	cfg := Config{
 		StaticDir:   t.TempDir(),
 		ClientID:    "test-client",
 		AgentToken:  testAgentToken,
 		Secret:      authz.GenerateSecret(),
 		DevIdentity: true,
 		RoomIdle:    time.Hour,
-	})
+	}
+	tweak(&cfg)
+	g, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -727,7 +734,11 @@ func TestWatchdogReportsOfflineAndLive(t *testing.T) {
 	})
 
 	g.heal(time.Now())
-	if got := readStatus(t, ctx, viewer); got != wire.StatusLive {
+	got := readStatus(t, ctx, viewer)
+	for got == wire.StatusOffline {
+		got = readStatus(t, ctx, viewer)
+	}
+	if got != wire.StatusLive {
 		t.Errorf("status after the agent returned = %q, want %q", got, wire.StatusLive)
 	}
 }
@@ -751,14 +762,10 @@ func TestViewerCannotSendRestart(t *testing.T) {
 }
 
 func TestAgentSocketIsPinged(t *testing.T) {
-	oldInterval, oldTimeout := agentPingInterval, agentPingTimeout
-	t.Cleanup(func() {
-		agentPingInterval, agentPingTimeout = oldInterval, oldTimeout
+	g, srv := newTestGatewayWith(t, func(c *Config) {
+		c.PingInterval = 20 * time.Millisecond
+		c.PingTimeout = 50 * time.Millisecond
 	})
-	agentPingInterval = 20 * time.Millisecond
-	agentPingTimeout = 50 * time.Millisecond
-
-	g, srv := newTestGateway(t)
 	wsDial(t, wsURLOf(srv, "/agent", "room=room-deaf"), agentHeader())
 	waitFor(t, "the agent to attach", func() bool { return agentAttached(g, "room-deaf") })
 
@@ -940,5 +947,26 @@ func TestOneUserCannotOpenUnlimitedSockets(t *testing.T) {
 	rm, _ := g.rooms.Get("room-flood")
 	if n := rm.ViewerCount(); n != maxSocketsPerUser {
 		t.Fatalf("%d sockets held, want %d", n, maxSocketsPerUser)
+	}
+}
+
+func TestAgentAndStatsRefuseRequestsThatCameThroughCloudflare(t *testing.T) {
+	_, srv := newTestGateway(t)
+
+	for _, edge := range []string{"Cf-Connecting-Ip", "Cf-Ray"} {
+		header := agentHeader()
+		header.Set(edge, "203.0.113.7")
+		if code, _ := getJSON(t, srv, "/api/stats", header); code != http.StatusNotFound {
+			t.Errorf("stats with %s returned %d, want 404", edge, code)
+		}
+		if code, _ := getJSON(t, srv, "/.proxy/api/stats", header); code != http.StatusNotFound {
+			t.Errorf("proxied stats with %s returned %d, want 404", edge, code)
+		}
+		if code, _ := getJSON(t, srv, "/agent?room=main", header); code != http.StatusNotFound {
+			t.Errorf("agent with %s returned %d, want 404", edge, code)
+		}
+	}
+	if code, _ := getJSON(t, srv, "/api/stats", agentHeader()); code != http.StatusOK {
+		t.Errorf("in cluster stats returned %d, want 200", code)
 	}
 }

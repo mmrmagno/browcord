@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	mediaBuffer = 16
+	mediaBuffer = 128
 	ctlBuffer   = 64
 )
 
@@ -67,6 +67,7 @@ type Room struct {
 
 	chunks      atomic.Int64
 	bytes       atomic.Int64
+	dropped     atomic.Int64
 	lastChunk   atomic.Int64
 	videoChunks atomic.Int64
 	audioChunks atomic.Int64
@@ -240,6 +241,7 @@ type Stats struct {
 	VideoChunks int64  `json:"videoChunks"`
 	AudioChunks int64  `json:"audioChunks"`
 	AudioIdle   int64  `json:"secondsSinceAudio"`
+	Dropped     int64  `json:"droppedChunks"`
 }
 
 func (r *Room) Stats() Stats {
@@ -268,6 +270,7 @@ func (r *Room) Stats() Stats {
 		SecondsIdle: idle,
 		HasVideo:    hasVideo,
 		VideoChunks: r.videoChunks.Load(),
+		Dropped:     r.dropped.Load(),
 		AudioChunks: r.audioChunks.Load(),
 		AudioIdle:   audioIdle,
 	}
@@ -303,32 +306,40 @@ func (r *Room) Publish(c wire.Chunk) {
 
 	for _, v := range r.viewers {
 		if v.needsKeyframe.Load() {
-			if c.Type != wire.VideoKey && c.Type != wire.VideoConfig && c.Type != wire.AudioConfig {
+			if c.Type == wire.VideoDelta {
 				continue
 			}
-			v.needsKeyframe.Store(false)
+			if c.Type == wire.VideoKey {
+				v.needsKeyframe.Store(false)
+			}
 		}
-		sendMedia(v, c)
+		if !sendMedia(v, c) {
+			r.dropped.Add(1)
+		}
 	}
 }
 
-func sendMedia(v *Viewer, c wire.Chunk) {
+func sendMedia(v *Viewer, c wire.Chunk) (sent bool) {
 	encoded, err := c.Append(nil)
 	if err != nil {
-		return
+		return true
 	}
 
 	defer func() {
-		_ = recover()
+		if recover() != nil {
+			sent = true
+		}
 	}()
 
 	select {
 	case v.Media <- encoded:
+		return true
 	default:
 		v.dropped.Add(1)
 		if c.Type == wire.VideoDelta || c.Type == wire.VideoKey {
 			v.needsKeyframe.Store(true)
 		}
+		return false
 	}
 }
 

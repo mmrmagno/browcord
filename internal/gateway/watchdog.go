@@ -11,12 +11,10 @@ import (
 )
 
 var (
-	watchdogInterval  = 5 * time.Second
-	stallAfter        = 15 * time.Second
-	noVideoAfter      = 20 * time.Second
-	kickCooldown      = 60 * time.Second
-	agentPingInterval = 25 * time.Second
-	agentPingTimeout  = 10 * time.Second
+	watchdogInterval = 5 * time.Second
+	stallAfter       = 15 * time.Second
+	noVideoAfter     = 20 * time.Second
+	kickCooldown     = 60 * time.Second
 )
 
 type healState struct {
@@ -149,8 +147,8 @@ func (g *Gateway) roomStatus(roomID string) string {
 	return wire.StatusLive
 }
 
-func pingAgent(ctx context.Context, conn *websocket.Conn) {
-	ticker := time.NewTicker(agentPingInterval)
+func pingAgent(ctx context.Context, conn *websocket.Conn, interval, timeout time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -158,7 +156,7 @@ func pingAgent(ctx context.Context, conn *websocket.Conn) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			deadline, cancel := context.WithTimeout(ctx, agentPingTimeout)
+			deadline, cancel := context.WithTimeout(ctx, timeout)
 			err := conn.Ping(deadline)
 			cancel()
 			if err != nil {
