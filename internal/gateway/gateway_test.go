@@ -942,3 +942,24 @@ func TestOneUserCannotOpenUnlimitedSockets(t *testing.T) {
 		t.Fatalf("%d sockets held, want %d", n, maxSocketsPerUser)
 	}
 }
+
+func TestAgentAndStatsRefuseRequestsThatCameThroughCloudflare(t *testing.T) {
+	_, srv := newTestGateway(t)
+
+	for _, edge := range []string{"Cf-Connecting-Ip", "Cf-Ray"} {
+		header := agentHeader()
+		header.Set(edge, "203.0.113.7")
+		if code, _ := getJSON(t, srv, "/api/stats", header); code != http.StatusNotFound {
+			t.Errorf("stats with %s returned %d, want 404", edge, code)
+		}
+		if code, _ := getJSON(t, srv, "/.proxy/api/stats", header); code != http.StatusNotFound {
+			t.Errorf("proxied stats with %s returned %d, want 404", edge, code)
+		}
+		if code, _ := getJSON(t, srv, "/agent?room=main", header); code != http.StatusNotFound {
+			t.Errorf("agent with %s returned %d, want 404", edge, code)
+		}
+	}
+	if code, _ := getJSON(t, srv, "/api/stats", agentHeader()); code != http.StatusOK {
+		t.Errorf("in cluster stats returned %d, want 200", code)
+	}
+}

@@ -133,13 +133,13 @@ func New(cfg Config) (*Gateway, error) {
 func (g *Gateway) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", g.health)
-	mux.HandleFunc("/api/stats", g.stats)
+	mux.Handle("/api/stats", internalOnly(http.HandlerFunc(g.stats)))
 	mux.HandleFunc("/api/config", g.config)
 	mux.HandleFunc("/api/token", g.token)
 	mux.HandleFunc("/api/clientlog", g.clientLog)
 	mux.HandleFunc("/ws/ctl", g.viewerCtl)
 	mux.HandleFunc("/ws/media", g.viewerMedia)
-	mux.HandleFunc("/agent", g.agent)
+	mux.Handle("/agent", internalOnly(http.HandlerFunc(g.agent)))
 	mux.Handle("/", noStore(http.FileServer(http.Dir(g.cfg.StaticDir))))
 
 	return stripProxyPrefix(mux)
@@ -152,6 +152,16 @@ func noStore(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Pragma", "no-cache")
 		w.Header().Set("Expires", "0")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func internalOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Cf-Connecting-Ip") != "" || r.Header.Get("Cf-Ray") != "" {
+			http.NotFound(w, r)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
