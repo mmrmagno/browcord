@@ -18,15 +18,22 @@ const testAgentToken = "agent-token-for-tests"
 
 func newTestGateway(t *testing.T) (*Gateway, *httptest.Server) {
 	t.Helper()
+	return newTestGatewayWith(t, func(*Config) {})
+}
 
-	g, err := New(Config{
+func newTestGatewayWith(t *testing.T, tweak func(*Config)) (*Gateway, *httptest.Server) {
+	t.Helper()
+
+	cfg := Config{
 		StaticDir:   t.TempDir(),
 		ClientID:    "test-client",
 		AgentToken:  testAgentToken,
 		Secret:      authz.GenerateSecret(),
 		DevIdentity: true,
 		RoomIdle:    time.Hour,
-	})
+	}
+	tweak(&cfg)
+	g, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -751,14 +758,10 @@ func TestViewerCannotSendRestart(t *testing.T) {
 }
 
 func TestAgentSocketIsPinged(t *testing.T) {
-	oldInterval, oldTimeout := agentPingInterval, agentPingTimeout
-	t.Cleanup(func() {
-		agentPingInterval, agentPingTimeout = oldInterval, oldTimeout
+	g, srv := newTestGatewayWith(t, func(c *Config) {
+		c.PingInterval = 20 * time.Millisecond
+		c.PingTimeout = 50 * time.Millisecond
 	})
-	agentPingInterval = 20 * time.Millisecond
-	agentPingTimeout = 50 * time.Millisecond
-
-	g, srv := newTestGateway(t)
 	wsDial(t, wsURLOf(srv, "/agent", "room=room-deaf"), agentHeader())
 	waitFor(t, "the agent to attach", func() bool { return agentAttached(g, "room-deaf") })
 

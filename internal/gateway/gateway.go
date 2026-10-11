@@ -51,6 +51,8 @@ type Config struct {
 	Supervisor   Supervisor
 	RoomCeiling  time.Duration
 	MetricsAddr  string
+	PingInterval time.Duration
+	PingTimeout  time.Duration
 }
 
 func (c *Config) applyDefaults() {
@@ -71,6 +73,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.InkTTL == 0 {
 		c.InkTTL = 15 * time.Second
+	}
+	if c.PingInterval == 0 {
+		c.PingInterval = 25 * time.Second
+	}
+	if c.PingTimeout == 0 {
+		c.PingTimeout = 10 * time.Second
 	}
 }
 
@@ -775,7 +783,7 @@ func (g *Gateway) agent(w http.ResponseWriter, r *http.Request) {
 	log.Printf("gateway: agent connected for room %s", roomID)
 
 	ctx := r.Context()
-	go pingAgent(ctx, conn)
+	go pingAgent(ctx, conn, g.cfg.PingInterval, g.cfg.PingTimeout)
 
 	for {
 		typ, data, err := conn.Read(ctx)
