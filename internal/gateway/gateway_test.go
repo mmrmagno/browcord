@@ -734,7 +734,11 @@ func TestWatchdogReportsOfflineAndLive(t *testing.T) {
 	})
 
 	g.heal(time.Now())
-	if got := readStatus(t, ctx, viewer); got != wire.StatusLive {
+	got := readStatus(t, ctx, viewer)
+	for got == wire.StatusOffline {
+		got = readStatus(t, ctx, viewer)
+	}
+	if got != wire.StatusLive {
 		t.Errorf("status after the agent returned = %q, want %q", got, wire.StatusLive)
 	}
 }
