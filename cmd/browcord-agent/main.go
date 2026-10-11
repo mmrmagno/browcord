@@ -27,8 +27,8 @@ func main() {
 		Capture: capture.Config{
 			Source:           capture.Source(envOr("ROOM_SOURCE", "x11")),
 			Display:          envOr("DISPLAY", ":0"),
-			Width:            envInt("ROOM_WIDTH", 1280),
-			Height:           envInt("ROOM_HEIGHT", 720),
+			Width:            envInt("ROOM_WIDTH", 1920),
+			Height:           envInt("ROOM_HEIGHT", 1080),
 			FPS:              envInt("ROOM_FPS", 30),
 			VideoBitrateKbps: envInt("ROOM_BITRATE_KBPS", 4000),
 			Encoder:          capture.Encoder(envOr("ROOM_ENCODER", "auto")),
