@@ -2,19 +2,20 @@ import { Chunk, ChunkType, codecFromParameterSets } from "./transport";
 import { PtsWatch } from "./discontinuity";
 import { RestartBudget } from "./restart";
 
-const AUDIO_BUFFER_MIN_S = 0.04;
-const AUDIO_BUFFER_MAX_S = 0.2;
+const AUDIO_BUFFER_MIN_S = 0.12;
+const AUDIO_BUFFER_MAX_S = 0.4;
+const AUDIO_UNDERRUN_STEP_S = 0.04;
 const AUDIO_JITTER_K = 2.5;
 const AUDIO_RESYNC_S = 0.05;
 const AUDIO_WARMUP_S = 60;
-const AUDIO_WARMUP_BUFFER_S = 0.15;
+const AUDIO_WARMUP_BUFFER_S = 0.25;
 const AUDIO_WARMUP_RESYNC_S = 0.15;
 const VIDEO_OFFSET_ALPHA = 0.05;
 const VIDEO_OFFSET_SAMPLES = 10;
 const VIDEO_JITTER_ALPHA = 0.05;
 const VIDEO_JITTER_K = 3;
 const VIDEO_LEAD_MAX_S = 0.15;
-const VIDEO_QUEUE_MAX = 8;
+const VIDEO_QUEUE_MAX = 20;
 const PACE_SWEEP_MS = 32;
 const VIDEO_RESTART_LIMIT = 5;
 const VIDEO_RESTART_WINDOW_MS = 60000;
@@ -43,6 +44,7 @@ export class Player {
   private audioSamples = 0;
   private audioNeed = AUDIO_BUFFER_MIN_S;
   private audioStartAt = 0;
+  private audioFloor = AUDIO_BUFFER_MIN_S;
   private restarts = new RestartBudget(VIDEO_RESTART_LIMIT, VIDEO_RESTART_WINDOW_MS);
   private ptsWatch = new PtsWatch();
 
@@ -316,7 +318,7 @@ export class Player {
       const bufferS = Math.min(
         Math.max(
           AUDIO_BUFFER_MIN_S + (AUDIO_JITTER_K * this.audioJitterMs) / 1000,
-          warming ? AUDIO_WARMUP_BUFFER_S : AUDIO_BUFFER_MIN_S,
+          warming ? Math.max(AUDIO_WARMUP_BUFFER_S, this.audioFloor) : this.audioFloor,
         ),
         AUDIO_BUFFER_MAX_S,
       );
@@ -330,6 +332,7 @@ export class Player {
         start = floor;
         this.audioLocked = false;
         this.audioUnderruns++;
+        this.audioFloor = Math.min(this.audioFloor + AUDIO_UNDERRUN_STEP_S, AUDIO_BUFFER_MAX_S);
       }
 
       if (this.videoSamples >= VIDEO_OFFSET_SAMPLES) {
