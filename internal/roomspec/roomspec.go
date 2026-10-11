@@ -47,3 +47,13 @@ func ContainerName(roomID string) string {
 	sum := sha256.Sum256([]byte(roomID))
 	return NamePrefix + hex.EncodeToString(sum[:8])
 }
+
+var PassthroughEnv = []string{
+	"ROOM_WIDTH",
+	"ROOM_HEIGHT",
+	"ROOM_FPS",
+	"ROOM_BITRATE_KBPS",
+	"ROOM_ENCODER",
+	"ROOM_START_URL",
+	"ROOM_STALL_SECONDS",
+}
