@@ -233,8 +233,10 @@ func TestCreatedPodCarriesTheFullHardeningSet(t *testing.T) {
 		t.Errorf("capabilities %+v", sc.Capabilities)
 	case len(c.Ports) != 0:
 		t.Error("container exposes ports")
-	case c.Resources.Limits["memory"] != "4Gi" || c.Resources.Limits["cpu"] != "2500m":
+	case c.Resources.Limits["memory"] != "4Gi" || c.Resources.Limits["cpu"] != "4":
 		t.Errorf("limits %v", c.Resources.Limits)
+	case c.Resources.Requests["memory"] != c.Resources.Limits["memory"] || c.Resources.Requests["cpu"] != c.Resources.Limits["cpu"]:
+		t.Errorf("requests %v differ from limits, the room would not get Guaranteed QoS", c.Resources.Requests)
 	case c.LivenessProbe == nil || c.StartupProbe == nil:
 		t.Error("container has no health probes, a stalled browser would never restart")
 	}

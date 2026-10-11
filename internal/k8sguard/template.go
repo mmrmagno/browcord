@@ -124,8 +124,8 @@ func (t Template) Pod(roomID, token string) (Pod, error) {
 					Capabilities:             &Capabilities{Drop: []string{"ALL"}},
 				},
 				Resources: Resources{
-					Requests: map[string]string{"cpu": "1", "memory": "1Gi"},
-					Limits:   map[string]string{"cpu": "2500m", "memory": "4Gi"},
+					Requests: map[string]string{"cpu": "4", "memory": "4Gi"},
+					Limits:   map[string]string{"cpu": "4", "memory": "4Gi"},
 				},
 				VolumeMounts: []VolumeMount{
 					{Name: "shm", MountPath: "/dev/shm"},
