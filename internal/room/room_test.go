@@ -562,3 +562,26 @@ func TestAudioKeepsFlowingWhileVideoWaitsForAKeyframe(t *testing.T) {
 		t.Errorf("while waiting for a keyframe the viewer got %v, want only the audio chunk", got)
 	}
 }
+
+func TestControlSocketsGetNoMediaAndCountNoDrops(t *testing.T) {
+	r := New("room-1")
+	ctl, _ := r.AdmitControl("c1", "user-1", "marcos", 0, 0)
+	media := r.Join("m1", "user-1", "marcos")
+	drain(media)
+
+	r.Publish(chunk(wire.VideoConfig, 0))
+	r.Publish(chunk(wire.VideoKey, 0))
+	for i := 0; i < mediaBuffer*2; i++ {
+		r.Publish(chunk(wire.Audio, uint64(i+1)))
+		drain(media)
+	}
+
+	if ctl.Media != nil {
+		t.Fatal("a control socket was given a media queue nobody reads")
+	}
+	if d := r.Stats().Dropped; d != 0 {
+		t.Errorf("%d chunks counted as dropped with one healthy media viewer", d)
+	}
+	r.Leave("c1")
+	r.Leave("m1")
+}
